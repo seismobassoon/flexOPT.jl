@@ -376,7 +376,7 @@ function famousEquation(::Val{:eq_2DacousticTime})
     @variables v(x,y)  u(x,y,t) f(x,y,t)
     
     exprs =  ∂t²(u)- v^2 *(∂x²(u) + ∂y²(u))
-    fields=u
+    fields= u
     vars = v
 
     extexprs = f
@@ -456,6 +456,49 @@ function famousEquation(::Val{:eq_3DsismoTimeIsoHeteroForce})
         coordinates, ∂, ∂²
 end
 
+
+
+function famousEquation(::Val{:eq_2Dgoundwater})
+    @variables u(x,z,t) f(x,z,t)
+    @variables cₛ Λ c₁ γ
+
+    # λ(u) is a constitutive law, not an independent field.  The normalized
+    # head q runs from zero to one while 0 < u < 1/c₁.
+    q = c₁ * u
+    gentle_step = q^3 * (10 - 15q + 6q^2)
+    λu = ifelse(
+        q <= 0,
+        0,
+        ifelse(q < 1, gentle_step^γ, 1),
+    )
+
+    # In the (x,z) plane, ∇u + e_z = (∂x(u), ∂z(u) + 1).
+    flux_x = λu * Λ * ∂x(u)
+    flux_z = λu * Λ * (∂z(u) + 1)
+
+    expr = cₛ * ∂t(u) - (
+        ∂x(flux_x) +
+        ∂z(flux_z)
+    )
+
+    exprs = expr
+    fields = u
+    vars = (cₛ, Λ, c₁, γ)
+
+    # Optional volumetric source.  Supply a zero-valued array for the
+    # source-free equation; keeping f(x,z,t) here gives the forcing recipe
+    # the same space-time geometry as u.
+    extexprs = f
+    extfields = f
+    extvars = f
+
+    coordinates = (x, z, t)
+    ∂, ∂² = usefulPartials(coordinates)
+
+    return exprs, fields, vars,
+           extexprs, extfields, extvars,
+           coordinates, ∂, ∂²
+end
 
 function famousEquation(::Val{:eq_highSchoolProblem})
     

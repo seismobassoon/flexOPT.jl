@@ -124,12 +124,18 @@ function nondimensionalize_elasticity_tensor(
     rho0 = _positive_reference_density(rho, reference_density)
     scaling = opt_nondimensionalization(delta;
         reference_density=rho0, reference_field=reference_field)
-    Chat = Float64.(C)
+    # `float` preserves Complex inputs (for frequency-domain attenuation),
+    # whereas `Float64.(C)` silently rejects their imaginary parts.
+    Chat = float.(C)
     tail = ntuple(_ -> Colon(), ndims(Chat) - 4)
     tau2 = scaling.time_scale^2
     for i in 1:dimension, j in 1:dimension, k in 1:dimension, l in 1:dimension
         factor = tau2 / (rho0 * scaling.spatial_scales[j] * scaling.spatial_scales[l])
-        @views Chat[(i,j,k,l,tail...)...] .*= factor
+        if isempty(tail)
+            Chat[i,j,k,l] *= factor
+        else
+            @views Chat[(i,j,k,l,tail...)...] .*= factor
+        end
     end
     return (rho=Float64.(rho) ./ rho0, C=Chat, scaling=scaling)
 end
