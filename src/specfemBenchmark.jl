@@ -531,9 +531,16 @@ function make_specfem2d_snapshot_video(
     overwrite::Bool=true,
 )
     directory = abspath(output_directory)
-    images = sort(filter(path -> occursin(
-        r"^forward_(?:image|img)[0-9]+\.jpg$", basename(path)),
-        readdir(directory; join=true)))
+    all_images = readdir(directory; join=true)
+    # Some old cases contain both naming conventions from different runs.
+    # Never concatenate the two sequences: that creates a non-chronological
+    # video. Prefer SPECFEM's current `forward_image` sequence and fall back
+    # to the legacy `forward_img` sequence only when necessary.
+    current_images = sort(filter(path -> occursin(
+        r"^forward_image[0-9]+\.jpg$", basename(path)), all_images))
+    legacy_images = sort(filter(path -> occursin(
+        r"^forward_img[0-9]+\.jpg$", basename(path)), all_images))
+    images = isempty(current_images) ? legacy_images : current_images
     isempty(images) && throw(ArgumentError(
         "no SPECFEM2D forward_image*.jpg or forward_img*.jpg snapshots found in $directory",
     ))

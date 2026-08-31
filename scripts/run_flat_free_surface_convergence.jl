@@ -10,6 +10,8 @@ const NOTEBOOK = joinpath(ROOT, "notebooks",
     "HomogeneousElastic2DBenchmark_FreeSurface.ipynb")
 const OUTPUT_DIRECTORY = joinpath(ROOT, "data",
     "elastic2d_convergence", "homogeneous_flat_free_surface")
+const LONG_OPT5_OUTPUT_DIRECTORY = joinpath(ROOT, "data",
+    "elastic2d_convergence", "flat_free_surface_long_opt5")
 
 function parse_spacings(arguments)
     # 1000 m violates the notebook's minimum S-wavelength sampling for the
@@ -31,12 +33,23 @@ function compact_trace(trace)
     (time=Float64.(trace.time), values=Float64.(trace.values))
 end
 
-function run_worker(spacing)
+function run_worker(spacing; long_opt5=false)
     ENV["FLEXOPT_BENCHMARK_DX"] = string(spacing)
+    if long_opt5
+        ENV["FLEXOPT_BENCHMARK_QUICK"] = "false"
+        ENV["FLEXOPT_BENCHMARK_DURATION"] = "14.0"
+        ENV["FLEXOPT_DOMAIN_HALF_WIDTH"] = "90000.0"
+        ENV["FLEXOPT_BUILD_HIGHER_ORDER"] = "true"
+        ENV["FLEXOPT_RUN_OPT5"] = "true"
+        ENV["FLEXOPT_CASE_SUFFIX"] = "_long14s_opt5"
+    end
     ENV["FLEXOPT_RUN_TAKEUCHI_A90"] = "false"
     ENV["FLEXOPT_LOAD_SPECFEM_WAVEFIELD"] = "false"
+    case_prefix = "homogeneous_flat_free_surface"
+    case_spacing = long_opt5 ? spacing / 2 : spacing
+    case_suffix = long_opt5 ? "_long14s_opt5" : ""
     specfem_case = joinpath(ROOT, "data", "specfem2d_benchmarks",
-        "homogeneous_flat_free_surface_dx$(round(Int, spacing))m")
+        "$(case_prefix)_dx$(round(Int, case_spacing))m$(case_suffix)")
     # A completed case is deterministic for this fixed benchmark and can be
     # reused after an extraction/viewer failure.
     ENV["FLEXOPT_RUN_SPECFEM2D"] =
@@ -78,7 +91,11 @@ function run_worker(spacing)
                 fdCoordinates.x, fdCoordinates.z, receiverGrid)
             opt_x = sampler(uxOPT, optTimes, xOPT, zOPT, receiverGrid)
             opt_z = sampler(uzOPT, optTimes, xOPT, zOPT, receiverGrid)
-            return (
+            shifted_x = sampler(uxOPTShifted, optShiftedTimes,
+                xOPT, zOPT, receiverGrid)
+            shifted_z = sampler(uzOPTShifted, optShiftedTimes,
+                xOPT, zOPT, receiverGrid)
+            result = (
                 schema_version=1,
                 created_at=string(now()),
                 spacing_m=Float64(dx),
@@ -92,6 +109,9 @@ function run_worker(spacing)
                     dt=Float64(fd.dt)),
                 OPT3=(x=compact_trace(opt_x), z=compact_trace(opt_z),
                     dt=Float64(dtOPT), timing=propagationOPT.timing),
+                OPT3_shifted_full=(x=compact_trace(shifted_x),
+                    z=compact_trace(shifted_z), dt=Float64(dtOPT),
+                    timing=propagationOPTShifted.timing),
                 SPECFEM2D=(
                     x=[compact_trace(trace) for trace in specfemGridWaveformsX],
                     z=[compact_trace(trace) for trace in specfemGridWaveformsZ],
@@ -103,13 +123,22 @@ function run_worker(spacing)
                     case_directory=specfemCase.case_directory,
                 ),
             )
+            if runOPT5
+                opt5_x = sampler(uxOPT5, opt5Times, xOPT, zOPT, receiverGrid)
+                opt5_z = sampler(uzOPT5, opt5Times, xOPT, zOPT, receiverGrid)
+                result = merge(result, (OPT5=(x=compact_trace(opt5_x),
+                    z=compact_trace(opt5_z), dt=Float64(dtOPT),
+                    timing=propagationOPT5.timing),))
+            end
+            return result
         end
     end)
     result = Base.invokelatest(collector, specfem_wall_time)
 
-    mkpath(OUTPUT_DIRECTORY)
-    output = joinpath(OUTPUT_DIRECTORY,
-        "convergence_dx$(round(Int, spacing))m.jld2")
+    output_directory = long_opt5 ? LONG_OPT5_OUTPUT_DIRECTORY : OUTPUT_DIRECTORY
+    mkpath(output_directory)
+    output = joinpath(output_directory,
+        "convergence_dx$(round(Int, result.spacing_m))m.jld2")
     jldsave(output; result)
     @info "saved convergence result" output
     return output
@@ -163,6 +192,18 @@ end
 if !isempty(ARGS) && first(ARGS) == "--worker"
     length(ARGS) == 2 || error("usage: --worker spacing_m")
     run_worker(parse(Float64, ARGS[2]))
+elseif !isempty(ARGS) && first(ARGS) == "--long-opt5-worker"
+    length(ARGS) == 2 || error("usage: --long-opt5-worker nominal_spacing_m")
+    run_worker(parse(Float64, ARGS[2]); long_opt5=true)
+elseif !isempty(ARGS) && first(ARGS) == "--long-opt5"
+    spacings = isempty(ARGS[2:end]) ? [1000.0, 750.0, 500.0] :
+        parse.(Float64, ARGS[2:end])
+    mkpath(LONG_OPT5_OUTPUT_DIRECTORY)
+    for spacing in sort(unique(spacings); rev=true)
+        command = `$(Base.julia_cmd()) --project=$(ROOT) --startup-file=no --threads=8 $(@__FILE__) --long-opt5-worker $(spacing)`
+        @info "launching long OPT3/OPT5 worker" spacing command
+        run(command)
+    end
 elseif ARGS == ["--repair-existing"]
     repair_existing_results()
 else

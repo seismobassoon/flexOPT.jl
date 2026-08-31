@@ -457,37 +457,32 @@ function famousEquation(::Val{:eq_3DsismoTimeIsoHeteroForce})
 end
 
 
-
 function famousEquation(::Val{:eq_2Dgoundwater})
-    @variables u(x,z,t) f(x,z,t)
+    @variables hₚ(x,z,t) hₚᵏ(x,z) f(x,z,t)
     @variables cₛ Λ c₁ γ
 
-    # λ(u) is a constitutive law, not an independent field.  The normalized
-    # head q runs from zero to one while 0 < u < 1/c₁.
-    q = c₁ * u
-    gentle_step = q^3 * (10 - 15q + 6q^2)
-    λu = ifelse(
-        q <= 0,
+    λh = ifelse(
+        hₚᵏ <= 0,
         0,
-        ifelse(q < 1, gentle_step^γ, 1),
+        ifelse(hₚᵏ < 1 / c₁, (c₁ * hₚᵏ)^γ, 1),
     )
 
-    # In the (x,z) plane, ∇u + e_z = (∂x(u), ∂z(u) + 1).
-    flux_x = λu * Λ * ∂x(u)
-    flux_z = λu * Λ * (∂z(u) + 1)
+    # ∇hₚ + e_z = (∂x(hₚ), ∂z(hₚ) + 1)
+    flux_x = λh * Λ * ∂x(hₚ)
+    flux_z = λh * Λ * (∂z(hₚ) + 1)
 
-    expr = cₛ * ∂t(u) - (
+    exprs = cₛ * ∂t(hₚ) - (
         ∂x(flux_x) +
         ∂z(flux_z)
     )
 
-    exprs = expr
-    fields = u
-    vars = (cₛ, Λ, c₁, γ)
+    fields = hₚ
+    # hₚᵏ is the spatial state from the preceding Picard iteration.  The
+    # numerical operator freezes λ(hₚᵏ), while hₚ remains the solved field.
+    vars = (cₛ, Λ, c₁, γ, hₚᵏ)
 
-    # Optional volumetric source.  Supply a zero-valued array for the
-    # source-free equation; keeping f(x,z,t) here gives the forcing recipe
-    # the same space-time geometry as u.
+    # Keep a space-time forcing field for the OPT recipe.
+    # Give it a zero-valued numerical array for the source-free case.
     extexprs = f
     extfields = f
     extvars = f
