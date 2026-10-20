@@ -211,7 +211,7 @@ end
 # Part of the recipe cache key: bump it whenever the famousEquation entry in
 # helpers/sphericalTI_SH.jl changes, so that stale cached recipes are not reused
 # (myProduceOrLoad hashes the parameters, not the equation definition).
-const SH_EQUATION_REVISION = "1DsphericalSH_TI_Freq-v1"
+const SH_EQUATION_REVISION = "1DsphericalSH_TI_Freq-v1"  # (recipe_backend=:cpu also enters the cache key)
 
 """
     shRecipe(config; equation="1DsphericalSH_TI_Freq", form=nothing)
@@ -234,6 +234,11 @@ function shRecipe(config; equation="1DsphericalSH_TI_Freq", form=nothing)
         "materItpl" => config.materItpl,
         "variationalForm" => form,
         "equationRevision" => SH_EQUATION_REVISION,
+        # Recipes MUST be built on the CPU: on a GPU backend (Metal here)
+        # makeOPTrecette.jl computes the coefficients in Float32
+        # (coefficientFloat, l. ~500), which leaves a ~1e-7 inexactness in the
+        # stencils, amplified as ~eps/(kh)^2 in the residual (Step 2b-ii').
+        "recipe_backend" => :cpu,
     )
     return myProduceOrLoad(makeOPTsemiSymbolic, p, "semiSymbolic")
 end
@@ -402,6 +407,61 @@ function shZoneComparison(model, configs; l=10, Ω=200.0, h=50.0, mode=:uniform,
                     row.zone, row.rbot, row.rtop, row.n, row.h_km, row.config,
                     row.scale_over_h, row.relDiffDSM)
         end
+    end
+    return out
+end
+
+# ---------------------------------------------------------------------------
+# recipe exactness diagnostic (constant unit material, polynomial fields)
+# ---------------------------------------------------------------------------
+
+"""
+    shStencilExactness(configs; n=41)
+
+Pure-recipe check in the scaled coordinate s (Δ = 1), with ONE unit material
+field at a time (all others zero) on n nodes, applied to W = s^k:
+
+* `:Lr²`  (operator ∂s(∂sW) = W''):  A·1 and A·s must vanish exactly;
+  A·s², A·s³ must be proportional to W'' (fitted scale σ)
+* `:Lr`   (operator -∂s(W) + ∂sW ≡ 0): A·s^k must vanish for every k
+
+Returned errors are relative to max|A|·max|W| on interior rows.  Anything
+much above ~1e-13 is an inexactness of the recipe itself; in the spherical
+residual it is amplified by 1/(kh)², which would explain a floor that grows
+as h decreases.
+"""
+function shStencilExactness(configs; n=41)
+    s = collect(0.0:n-1)
+    out = NamedTuple[]
+    for c in configs
+        rec = shRecipe(c)
+        rows = _interior(n, c)
+        unit(i) = Any[(j == i ? ones(n) : zeros(n)) for j in 1:4]
+        A2 = flexOPTSHMatrix(rec, push!(unit(2), 0.0))   # Lr² = 1
+        A1 = flexOPTSHMatrix(rec, push!(unit(3), 0.0))   # Lr  = 1
+        rel(A, W, target) = maximum(abs.(A[rows, :] * W .- target[rows])) /
+                            (maximum(abs.(A[rows, :])) * maximum(abs.(W)))
+        # The Lr part must vanish identically, so it cannot be normalised by
+        # itself: compare it with the size of ONE of its two terms (|∫X'W| ~ 1/2)
+        # i.e. report max|A_Lr W| / (max|W| · 1/2) and max|A_Lr| directly.
+        absLr(W) = maximum(abs.(A1[rows, :] * W)) / (0.5 * maximum(abs.(W)))
+        W2 = s .^ 2; W3 = s .^ 3
+        d2 = 2.0 .* ones(n); d3 = 6.0 .* s
+        σ = dot(A2[rows, :] * W3, d3[rows]) / dot(d3[rows], d3[rows])
+        row = (config=c.name, σ=σ,
+               Lr²_const=rel(A2, ones(n), zeros(n)),
+               Lr²_linear=rel(A2, s, zeros(n)),
+               Lr²_quadratic=rel(A2, W2, σ .* d2),
+               Lr²_cubic=rel(A2, W3, σ .* d3),
+               Lr_maxabsA=maximum(abs.(A1[rows, :])),
+               Lr_const=absLr(ones(n)),
+               Lr_linear=absLr(s),
+               Lr_cubic=absLr(W3))
+        push!(out, row)
+        @printf("%-8s σ=% .9f | Lr²: 1→%.1e s→%.1e s²→%.1e s³→%.1e | Lr: max|A|=%.1e  1→%.1e s→%.1e s³→%.1e\n",
+                row.config, row.σ, row.Lr²_const, row.Lr²_linear, row.Lr²_quadratic,
+                row.Lr²_cubic, row.Lr_maxabsA, row.Lr_const, row.Lr_linear, row.Lr_cubic)
+        println("          recipe backend: ", rec["recette"].recipe_backend)
     end
     return out
 end

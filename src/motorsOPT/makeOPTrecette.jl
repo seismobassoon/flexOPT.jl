@@ -31,6 +31,27 @@ function _normalise_recipe_backend(backend_spec)
     end
 end
 
+"""
+Resolve `recipe_backend = :auto` once the equation is known.
+
+Recipe coefficients are computed in Float32 on a GPU backend (see
+`coefficientFloat` below), which leaves a ~1e-7 relative inexactness in every
+stencil; it shows up as an accuracy floor ~1e-7/(kh)^2 on fine grids.  So
+`:auto` means the CPU (Float64) for equations with up to 3 coordinates, where a
+recipe takes seconds, and keeps the current (GPU) backend only for 4
+coordinates (3D + t), where the recipe is expensive -- with a warning.  An
+explicit backend (:cpu, :metal, :cuda, ...) is honoured unchanged.
+"""
+function _resolve_auto_recipe_backend(backend_spec, ncoordinates::Integer)
+    is_auto = backend_spec === nothing || backend_spec === :auto || backend_spec == "auto"
+    is_auto && ncoordinates <= 3 && return CPU()
+    selected = _normalise_recipe_backend(backend_spec)
+    if is_auto && !(selected isa KernelAbstractions.CPU)
+        @warn "recipe_backend=:auto with $(ncoordinates) coordinates: recipe built on $(nameof(typeof(selected))) in Float32 (pass recipe_backend=:cpu for Float64 coefficients)" maxlog=1
+    end
+    return selected
+end
+
 function _recipe_backend_name(recipe_backend)
     recipe_backend isa KernelAbstractions.CPU && return :cpu
     return Symbol(lowercase(string(nameof(typeof(recipe_backend)))))
@@ -106,7 +127,8 @@ _public_variational_form(form::Symbol) =
 
 function makeOPTsemiSymbolic(params::Dict)
     @unpack famousEquationType, Δ, orderBtime, orderBspace, pointsInSpace, pointsInTime, supplementaryOrder, fieldItpl, materItpl = params
-    recipe_backend = _normalise_recipe_backend(_opt_paramget(params, :recipe_backend, _opt_paramget(params, :coefficient_backend, :auto)))
+    # resolved below, once the number of coordinates of the equation is known
+    recipe_backend_spec = _opt_paramget(params, :recipe_backend, _opt_paramget(params, :coefficient_backend, :auto))
     nuGeometryMode = Symbol(_opt_paramget(params, :nuGeometryMode, :middle))
     nuCentre = _opt_paramget(params, :nuCentre, nothing)
     exactTaylorTotalDegree = _opt_paramget(
@@ -155,6 +177,9 @@ function makeOPTsemiSymbolic(params::Dict)
     TaylorOptionsμᶜ=TaylorOptions(materItpl,supplementaryOrder)
 
     equationCharacteristics,equationCharacteristicsForce=famousEquations(famousEquationType)
+    recipe_backend = _resolve_auto_recipe_backend(
+        recipe_backend_spec, length(equationCharacteristics.coordinates),
+    )
     fields=equationCharacteristics.fields
     extfields=equationCharacteristicsForce.fields
 

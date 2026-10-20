@@ -22,3 +22,8 @@ only calls existing src/ functions directly.
   default, or planet1D's GT95 `re` grid), scaled local coordinate so one
   Δ=1 recipe serves all zones/h, conventional DSM SH reference matrices,
   and the convergence / zone-by-zone comparison drivers.
+- `sphericalTI_SH_step3.jl` -- Step 3: traction-free homogeneous shell,
+  exact toroidal eigenfrequencies (j_l, y_l), end-row closures
+  (:dsmHalf Galerkin natural row / one-sided traction collocation of order q),
+  OPT3 rows for the near-boundary rows wider stencils cannot reach, and the
+  generalized eigenproblem A₀v = -Ω²Mv.
