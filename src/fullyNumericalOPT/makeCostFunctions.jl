@@ -28,6 +28,12 @@ struct SparseNumericalOperator{T,S}
     geometry
 end
 
+# Size of either operator representation (the sparse one stores it only in
+# its matrix).  Used by _residual_numerical_operator so that
+# representation=:auto/:sparse works as well as :matrixfree.
+_operator_size(op::MatrixFreeNumericalOperator) = op.size
+_operator_size(op::SparseNumericalOperator) = size(op.matrix)
+
 function applyNumericalOperator!(y, op::MatrixFreeNumericalOperator, x)
     fill!(y, zero(eltype(y)))
     rows = op.table.rows
@@ -62,16 +68,18 @@ function applyNumericalOperator!(y, op::SparseNumericalOperator, x)
 end
 
 function _residual_numerical_operator(left, right)
-    left.size[1] == right.size[1] ||
+    lsize = _operator_size(left)
+    rsize = _operator_size(right)
+    lsize[1] == rsize[1] ||
         throw(DimensionMismatch("left and right numerical operators must have the same number of rows"))
     T = promote_type(eltype(left.table.vals), eltype(right.table.vals))
     rows = vcat(left.table.rows, right.table.rows)
-    cols = vcat(left.table.cols, Int32.(right.table.cols .+ left.size[2]))
+    cols = vcat(left.table.cols, Int32.(right.table.cols .+ lsize[2]))
     vals = vcat(T.(left.table.vals), .-T.(right.table.vals))
     table = CouplingTable(rows, cols, vals)
     return MatrixFreeNumericalOperator(
         table,
-        (left.size[1], left.size[2] + right.size[2]),
+        (lsize[1], lsize[2] + rsize[2]),
         "$(left.side)-$(right.side)",
         left.backend,
         :matrixfree,

@@ -250,7 +250,11 @@ function flexOPTSHMatrix(optRec, models; modelName="sphericalSH")
     modelFam = (models=models, modelName=modelName, modelPoints=(Nx), Δ=(1.0))
     params = Dict{String,Any}("optRec" => optRec, "modelFam" => modelFam,
                               "absorbingBoundaries" => nothing,
-                              "maskedRegionInSpace" => nothing)
+                              "maskedRegionInSpace" => nothing,
+                              # as in all the working notebooks: the default
+                              # (:auto -> sparse) is not accepted by
+                              # _residual_numerical_operator in src/
+                              "representation" => "matrixfree")
     numOps = numericalOperatorConstruction(params)["numOperators"]
     prepared = prepareLinearSystem(numOps)
     knownField = copy(prepared.known_lhs_template)
