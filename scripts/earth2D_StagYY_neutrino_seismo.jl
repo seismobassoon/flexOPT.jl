@@ -4,8 +4,9 @@
 #   * spherically averaged (1-D) and heterogeneous (2-D) models,
 #   * long-period P-SV waveforms (FD3: 3 points in space and time, traction-free
 #     surface) for a vertical point force at 600 km depth, receivers every 5°,
-#   * νe → νe survival probability through the same two disks,
-#   * one 2×3 summary figure (δT, δC, δwater, δlnVs, δP_ee, δu_r).
+#   * 3-flavour ν and ν̄ oscillations through the same two disks, folded with the
+#     Daemonflux atmospheric flux and CC cross sections (perfect detector),
+#   * one 2×3 summary figure (δT, δC, δwater, wavefield, δN_νe events, δu_r).
 #
 # Derived from notebooks/neutrinoPropagation.ipynb (StagYY reading, Z/A, nₑ,
 # creationPaths, Pνν) and notebooks/HomogeneousElastic2DBenchmark_FreeSurface.ipynb
@@ -46,7 +47,11 @@ planet1D.configure_input!()
 include(joinpath(flexopt_root, "src", "neutrinoOscillation.jl"))
 include(joinpath(flexopt_root, "src", "GeoPoints.jl"))           # creationPaths
 include(joinpath(flexopt_root, "src", "elasticWave2D.jl"))       # FD3 state + source
+include(joinpath(flexopt_root, "src", "neutrinoFlux.jl"))
+include(joinpath(flexopt_root, "src", "neutrinoCrossSections.jl"))
+include(joinpath(flexopt_root, "src", "neutrinoDetector.jl"))
 using .commonBatchs, .planet1D, .neutrinoOscillation, .GeoPoints, .elasticWave2D
+using .neutrinoFlux, .Neutrino_Cross_Sections, .neutrinoDetector
 using Interpolations, Statistics, LinearAlgebra, JLD2, CairoMakie, Printf
 using Base.Threads
 CairoMakie.activate!(type="png")
@@ -84,9 +89,10 @@ mohoRadius = 6346.6e3
 seismicScaling = (aT_top=-1.2e-4, aT_cmb=-0.5e-4,   # 1/K, linear in depth
     aC=0.015, aW=0.0, RSP=2.0, clip=0.10)
 
-# Neutrinos (same conventions as neutrinoPropagation.ipynb)
-energies = logrange(1.0, 100.0, 100)      # GeV
-cosθgrid = range(-1.0, 0.0, 200)
+# Neutrinos: same binning and flux as neutrinoPropagation.ipynb, so the cached
+# Daemonflux table in data/neutrinoFlux is reused (no Python call needed).
+energies = logrange(1.0, 100.0, 200)      # GeV
+cosθgrid = range(-1.0, 0.0, 400)
 binning = (energies=energies, cosθgrid=cosθgrid)
 Δbaseline = 50e3                          # m
 detectorDepth = 2.5e3                     # m below the surface, above the source
@@ -320,19 +326,36 @@ nₑ1D = nₑStats.radial_mean
 
 detectorLocal = SVector(0.0, planetRadius - detectorDepth)
 osc = set_oscillation_parameters()
-function survival(nₑ)
+function oscillation_probabilities(nₑ)
     sampling = creationPaths(nₑ, xs, zs, detectorLocal, binning;
         Δbaseline=Δbaseline, material_mask=material, modifiedLongitude2Disk=0.0,
         center=(0.0, 0.0), boundary_search_step=dx / 2, boundary_tolerance=10.0)
     conversion = pathsFromElectronDensity(sampling; reference_z_over_a=0.5)
-    probabilities = Pνν(osc, energies, conversion.paths;
+    ν = Pνν(osc, energies, conversion.paths;
         zoa=conversion.reference_z_over_a, roundU_and_H=false)
-    return Array(parent(probabilities))[:, :, 1, 1], sampling   # (energy, cosθ)
+    antiν = Pνν(osc, energies, conversion.paths;
+        zoa=conversion.reference_z_over_a, anti=true, roundU_and_H=false)
+    return ν, antiν, sampling                      # (energy, cosθ, initial, final)
 end
-Pee1D, sampling1D = survival(nₑ1D)
-Pee2D, _ = survival(nₑ2D)
-δPee = Pee2D .- Pee1D
-@show extrema(Pee1D) extrema(δPee)
+P1D, antiP1D, sampling1D = oscillation_probabilities(nₑ1D)
+P2D, antiP2D, _ = oscillation_probabilities(nₑ2D)
+Pee1D = Array(parent(P1D))[:, :, 1, 1]
+Pee2D = Array(parent(P2D))[:, :, 1, 1]
+
+# Perfect detector (20 Mt × 1 yr) with the atmospheric flux: νe + ν̄e CC events,
+# including the νμ → νe appearance channel, as in plot_interacting_events.
+set_default_neutrino_flux!(:Daemonflux; flux_mode=:total, return_uncertainties=false)
+neutrinoFluxTable = produce_or_load_neutrino_flux(binning)
+neutrinoCrossSectionTable = evaluate_neutrino_cross_sections(neutrinoFluxTable.energies)
+perfectDetector = PerfectDetector(mass_kg=20.0e9, livetime_s=365.25 * 24.0 * 3600.0)
+events1D = interacting_events(neutrinoFluxTable, neutrinoCrossSectionTable, P1D, antiP1D;
+    detector=perfectDetector)
+events2D = interacting_events(neutrinoFluxTable, neutrinoCrossSectionTable, P2D, antiP2D;
+    detector=perfectDetector)
+Nνe1D = events1D.combined.νe
+Nνe2D = events2D.combined.νe
+δNνe = Nνe2D .- Nνe1D
+@show sum(Nνe1D) sum(δNνe) extrema(δNνe)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Save products
@@ -342,7 +365,7 @@ jldsave(joinpath(outputDirectory, "earth2D_products.jld2");
     δT, δC, δW, δlnVs, δlnρ, nₑ1D, nₑ2D,
     epicentralDistances, sourceIndex, receiverIndices,
     time=seismo1D.time, ur1D=seismo1D.ur, ur2D=seismo2D.ur,
-    energies=collect(energies), cosθgrid=collect(cosθgrid), Pee1D, Pee2D,
+    energies=collect(energies), cosθgrid=collect(cosθgrid), Pee1D, Pee2D, Nνe1D, Nνe2D,
     seismicScaling, stagyyFiles, stagyyRotationDeg, dx, dominantPeriod, sourceDepth)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -388,14 +411,14 @@ end
 
 layoutP = GridLayout(figure[2, 2])
 axP = Axis(layoutP[1, 1]; xscale=log10, xlabel="E (GeV)", ylabel="cos θ (zenith)",
-    title="δP(νe→νe) = P₂D − P₁D")
-limP = symmetricLimit(δPee; q=0.995)
-hmP = heatmap!(axP, collect(energies), collect(cosθgrid), δPee;
+    title="δN(νe+ν̄e CC) = N₂D − N₁D, perfect detector 20 Mt·yr")
+limP = symmetricLimit(δNνe; q=0.995)
+hmP = heatmap!(axP, collect(energies), collect(cosθgrid), δNνe;
     colormap=:balance, colorrange=(-limP, limP))
-Colorbar(layoutP[1, 2], hmP; height=Relative(0.7))
+Colorbar(layoutP[1, 2], hmP; label="events / bin", height=Relative(0.7))
 
 axS = Axis(figure[2, 3]; xlabel="time (s)", ylabel="epicentral distance (°)",
-    title="δ seismogram: u_r 2-D (grey), δu_r = 2-D − 1-D (red); both / max|u_r 2-D|")
+    title="δ seismogram: u_r 2-D (grey), δu_r = 2-D − 1-D (red)")
 spacing = 0.48 * receiverSpacingDeg
 bodyWaveWindow = 1500.0
 n = min(size(seismo1D.ur, 1), size(seismo2D.ur, 1))
