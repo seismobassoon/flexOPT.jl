@@ -240,6 +240,9 @@ function shRecipe(config; equation="1DsphericalSH_TI_Freq", form=nothing)
         # stencils, amplified as ~eps/(kh)^2 in the residual (Step 2b-ii').
         "recipe_backend" => :cpu,
     )
+    # optional extra recipe parameters (e.g. the clipped boundary recipes of
+    # Step 3a': nuCentre, trialFunctionRefPoints, testIntegrationBounds, ...)
+    hasproperty(config, :extra) && merge!(p, Dict{String,Any}(config.extra))
     return myProduceOrLoad(makeOPTsemiSymbolic, p, "semiSymbolic")
 end
 

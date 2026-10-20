@@ -287,6 +287,22 @@ function makeOPTsemiSymbolic(params::Dict)
 
 end
 
+# Cache key of a recipe: record the backend actually used when it is the CPU
+# (see _resolve_auto_recipe_backend), so that recipes built on a GPU in
+# Float32 under the same parameters are never reloaded as if they were Float64.
+# GPU-resolved recipes keep their historical key, so the existing (expensive)
+# 4D caches remain valid.
+function commonBatchs.cacheKeyExtras(::typeof(makeOPTsemiSymbolic), params)
+    spec = _opt_paramget(params, :recipe_backend,
+        _opt_paramget(params, :coefficient_backend, :auto))
+    equation = _opt_paramget(params, :famousEquationType, nothing)
+    isnothing(equation) && return nothing
+    characteristics, _ = famousEquations(equation)
+    selected = _resolve_auto_recipe_backend(spec, length(characteristics.coordinates))
+    selected isa KernelAbstractions.CPU || return nothing
+    return Dict{String,Any}("recipe_backend_resolved" => "cpu")
+end
+
 
 function constructAmatrix(equationCharacteristics,numbersOfTheSystem,ordersForSplinesμ,configsTaylorμ,Δnum,bigα,varM;ImakeReport=true, recipe_backend=backend, taylor_inverse_mode=:hierarchical_constrained)
     return constructAmatrix(equationCharacteristics,numbersOfTheSystem,ordersForSplinesμ,configsTaylorμ,ordersForSplinesμ,configsTaylorμ,Δnum,bigα,varM;ImakeReport=ImakeReport, recipe_backend=recipe_backend, taylor_inverse_mode=taylor_inverse_mode)

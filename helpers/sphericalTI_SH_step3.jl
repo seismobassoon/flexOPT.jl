@@ -134,6 +134,81 @@ function shTractionRow(models, iend, q)
 end
 
 # ---------------------------------------------------------------------------
+# native flexOPT boundary rows: clipped (half-element) recipe   [Step 3a']
+# ---------------------------------------------------------------------------
+
+"""
+    shClippedBoundaryConfig(base; p, degree=p-1)
+
+1-D analogue of the `clipped_available` surface recipe of
+scripts/earth2D_OPT3_freesurface.jl: p one-sided trial nodes 1..p, the
+test-function centre on the last node (`nuCentre = p`, the free surface),
+linear one-sided field interpolation, material taken at the surface node, and
+the test function integrated only over the solid side
+(`testIntegrationBounds = (1, p)`) -- i.e. a half element with the natural
+(zero-traction) flux.  `base` is a weak-form volume config (OPT3).
+p = 2 should reproduce the conventional DSM half row.
+"""
+function shClippedBoundaryConfig(base; p::Integer, degree::Integer=p - 1)
+    base.orderBspace == -1 && error("the clipped boundary recipe needs a weak-form base (e.g. OPT3)")
+    return (name="$(base.name)_clip$(p)", orderBtime=base.orderBtime,
+            orderBspace=base.orderBspace, pointsInSpace=p,
+            pointsInTime=base.pointsInTime, supplementaryOrder=base.supplementaryOrder,
+            fieldItpl=(ptsSpace=p, ptsTime=1, offsetSpace=0.0, offsetTime=1,
+                       YorderBspace=1, YorderBtime=base.fieldItpl.YorderBtime),
+            materItpl=merge(base.materItpl, (offsetSpace=Float64(p - 1),)),
+            extra=Dict{String,Any}(
+                "nuCentre" => (p,),
+                "trialFunctionRefPoints" => (Tuple(1:max(p, 3)),),
+                "testIntegrationBounds" => ((1.0, Float64(p)),),
+                "exactTaylorTotalDegree" => degree))
+end
+
+"Models of `seg` mirrored (s → -s): arrays reversed and the Lr field negated."
+function _mirroredModels(m)
+    return Any[reverse(m[1]), reverse(m[2]), -reverse(m[3]), reverse(m[4]), m[5]]
+end
+
+"""
+    shClippedBoundaryRows(clipRec, model, seg, l)
+
+Top (free surface, node n) and bottom (CMB, node 1) rows (A₀ and Ω²-part)
+from the clipped recipe.  The bottom row uses the same recipe on the mirrored
+segment, mapped back.
+"""
+function shClippedBoundaryRows(clipRec, model, seg, l)
+    m0 = shScaledModels(model, seg, l, 0.0)
+    m1 = shScaledModels(model, seg, l, 1.0)
+    n = length(m0[1])
+    A0 = flexOPTSHMatrix(clipRec, m0); A1 = flexOPTSHMatrix(clipRec, m1)
+    R0 = flexOPTSHMatrix(clipRec, _mirroredModels(m0))
+    R1 = flexOPTSHMatrix(clipRec, _mirroredModels(m1))
+    top = (A0=A0[n, :], M=A1[n, :] .- A0[n, :])
+    bottom = (A0=reverse(R0[n, :]), M=reverse(R1[n, :] .- R0[n, :]))
+    return (top=top, bottom=bottom)
+end
+
+"""
+    compareClippedWithDSMHalf(clipRec, model, seg, l, Ω)
+
+Relative difference (after the best scale) between the clipped boundary rows
+at Ω and the conventional DSM half rows: ≈ 0 expected for p = 2.
+"""
+function compareClippedWithDSMHalf(clipRec, model, seg, l, Ω)
+    rows = shClippedBoundaryRows(clipRec, model, seg, l)
+    K = dsmSHConventional(model, seg, l, Ω).K
+    n = size(K, 1)
+    res = NamedTuple[]
+    for (name, r, kr) in (("top", rows.top, K[n, :]), ("bottom", rows.bottom, K[1, :]))
+        a = r.A0 .+ Ω^2 .* r.M
+        s = dot(a, kr) / dot(kr, kr)
+        push!(res, (side=name, scale_over_h=s / seg.hξ, relDiff=norm(a .- s .* kr) / norm(s .* kr),
+                    support=findall(!iszero, a)))
+    end
+    return res
+end
+
+# ---------------------------------------------------------------------------
 # assembly with closures, eigenfrequencies
 # ---------------------------------------------------------------------------
 
@@ -143,7 +218,8 @@ end
 (A₀, M) for one segment with both ends closed.  `recipes` is a Dict name →
 recipe (must contain `fallback` when the scheme's stencil is wider than 3).
 """
-function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallback="OPT3")
+function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallback="OPT3",
+                       clipBase="OPT3", clipConfig=nothing)
     rec = recipes[config.name]
     m0 = shScaledModels(model, seg, l, 0.0)
     A0 = flexOPTSHMatrix(rec, m0)
@@ -183,8 +259,16 @@ function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallbac
             A0[i, :] .= wgt .* row
             M[i, :] .= 0.0
         end
+    elseif closure isa Tuple && first(closure) === :clipped
+        # native flexOPT half-element rows; whole-row scaling does not change
+        # the generalized eigenvalues, so no rescaling is needed
+        haskey(recipes, clipBase) || error("closure (:clipped, p) needs the base recipe $clipBase")
+        clipRec = shRecipe(shClippedBoundaryConfig(clipConfig; p=closure[2]))
+        rows = shClippedBoundaryRows(clipRec, model, seg, l)
+        A0[n, :] .= rows.top.A0;    M[n, :] .= rows.top.M
+        A0[1, :] .= rows.bottom.A0; M[1, :] .= rows.bottom.M
     else
-        error("closure must be :dsmHalf or (:traction, q)")
+        error("closure must be :dsmHalf, (:traction, q) or (:clipped, p)")
     end
     return A0, M
 end
@@ -224,7 +308,7 @@ function shShellEigenBenchmark(configs; l=10, ρ=3.3, β=4.5, R=6371.0, rcmb=348
     Ωexact = β .* kexact[1:nModes]
     @printf("analytic Ω (ξ units, l=%d): %s\n", l, join((@sprintf("%.6f", w) for w in Ωexact), "  "))
     recipes = Dict(c.name => shRecipe(c) for c in configs)
-    haskey(recipes, "OPT3") || (recipes["OPT3"] = shRecipe(only(filter(c -> c.name == "OPT3", configs))))
+    clipConfig = only(filter(c -> c.name == "OPT3", configs))
     out = NamedTuple[]
     report(name, cl, n, h, Ω, nC) = begin
         k = min(nModes, length(Ω))
@@ -241,9 +325,15 @@ function shShellEigenBenchmark(configs; l=10, ρ=3.3, β=4.5, R=6371.0, rcmb=348
         ev = shEigenfrequencies(K0, KM)
         report("DSMconv", :natural, n, seg.h_km, ev.Ω, ev.nComplex)
         for c in configs, cl in closures
-            A0, M = shShellSystem(c, recipes, model, seg, l; closure=cl)
-            ev = shEigenfrequencies(A0, M)
-            report(c.name, cl, n, seg.h_km, ev.Ω, ev.nComplex)
+            try
+                A0, M = shShellSystem(c, recipes, model, seg, l; closure=cl,
+                                      clipConfig=clipConfig)
+                ev = shEigenfrequencies(A0, M)
+                report(c.name, cl, n, seg.h_km, ev.Ω, ev.nComplex)
+            catch err
+                @printf("%-8s %-14s n=%4d  FAILED: %s\n", c.name, string(cl), n,
+                        first(sprint(showerror, err), 300))
+            end
         end
     end
     return out
