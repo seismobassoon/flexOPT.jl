@@ -27,3 +27,8 @@ only calls existing src/ functions directly.
   (:dsmHalf Galerkin natural row / one-sided traction collocation of order q),
   OPT3 rows for the near-boundary rows wider stencils cannot reach, and the
   generalized eigenproblem A₀v = -Ω²Mv.
+- `sphericalTI_SH_step3b.jl` -- Step 3b: time-domain SH synthetics (DSM
+  style) for a point force with |m| ≤ 2 normalised toroidal harmonics,
+  PREM outer solid region joined at interfaces by adding half-element rows,
+  per-scheme global T/H_L/H_N basis matrices, complex-frequency DSM sum over
+  l and ω, inverse transform with e^{ω_I t}.

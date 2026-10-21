@@ -149,9 +149,9 @@ the test function integrated only over the solid side
 (zero-traction) flux.  `base` is a weak-form volume config (OPT3).
 p = 2 should reproduce the conventional DSM half row.
 """
-function shClippedBoundaryConfig(base; p::Integer, degree::Integer=p - 1)
+function shClippedBoundaryConfig(base; p::Integer, degree::Integer=p - 1, refPoints=:extended)
     base.orderBspace == -1 && error("the clipped boundary recipe needs a weak-form base (e.g. OPT3)")
-    return (name="$(base.name)_clip$(p)", orderBtime=base.orderBtime,
+    return (name="$(base.name)_clip$(p)_$(refPoints)", orderBtime=base.orderBtime,
             orderBspace=base.orderBspace, pointsInSpace=p,
             pointsInTime=base.pointsInTime, supplementaryOrder=base.supplementaryOrder,
             fieldItpl=(ptsSpace=p, ptsTime=1, offsetSpace=0.0, offsetTime=1,
@@ -159,7 +159,14 @@ function shClippedBoundaryConfig(base; p::Integer, degree::Integer=p - 1)
             materItpl=merge(base.materItpl, (offsetSpace=Float64(p - 1),)),
             extra=Dict{String,Any}(
                 "nuCentre" => (p,),
-                "trialFunctionRefPoints" => (Tuple(1:max(p, 3)),),
+                # :extended (default, Step 3a''): reference nodes 1..p+1 so that the
+                # test centre ν = p is interior to the reference family and only
+                # testIntegrationBounds clips it (a true half hat).  :as2D reproduces
+                # the 2D surface choice (1..max(p,3)), for which ν = p is the LAST
+                # reference node when p ≥ 3 (truncated end family -- Step 3a′ showed
+                # O(h) errors for p = 3, 5 with it).
+                "trialFunctionRefPoints" => (refPoints === :as2D ? Tuple(1:max(p, 3)) :
+                                             Tuple(1:p+1),),
                 "testIntegrationBounds" => ((1.0, Float64(p)),),
                 "exactTaylorTotalDegree" => degree))
 end
@@ -212,15 +219,30 @@ end
 # assembly with closures, eigenfrequencies
 # ---------------------------------------------------------------------------
 
+"config with extra recipe parameters added (kept in the cache key)"
+function withRecipeExtras(config, extras::AbstractDict)
+    old = hasproperty(config, :extra) ? Dict{String,Any}(config.extra) : Dict{String,Any}()
+    return merge(config, (extra=merge(old, Dict{String,Any}(extras)),))
+end
+
 """
-    shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallback="OPT3")
+    shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallback="OPT3",
+                  nearRows=:fallback, clipRefPoints=:extended)
 
 (A₀, M) for one segment with both ends closed.  `recipes` is a Dict name →
-recipe (must contain `fallback` when the scheme's stencil is wider than 3).
+recipe (must contain `fallback` when the scheme's stencil is wider than 3 and
+nearRows = :fallback).
 """
 function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallback="OPT3",
-                       clipBase="OPT3", clipConfig=nothing)
-    rec = recipes[config.name]
+                       clipBase="OPT3", clipConfig=nothing, nearRows=:fallback,
+                       clipRefPoints=:extended)
+    # nearRows = :fallback  -> rows the stencil cannot reach are taken from OPT3
+    #          = :movingNu  -> recipe built with nuGeometryMode = :all, so that
+    #            prepareNumericalOperatorGeometry moves ν inward near the ends and
+    #            every row except the two end rows keeps the scheme's own order
+    rec = nearRows === :movingNu ?
+        shRecipe(withRecipeExtras(config, Dict("nuGeometryMode" => :all))) :
+        recipes[config.name]
     m0 = shScaledModels(model, seg, l, 0.0)
     A0 = flexOPTSHMatrix(rec, m0)
     M = flexOPTSHMatrix(rec, shScaledModels(model, seg, l, 1.0)) .- A0
@@ -231,7 +253,7 @@ function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallbac
     lowBad = 1:(-minimum(offs))
     highBad = (n - maximum(offs) + 1):n
     bad = union(collect(lowBad), collect(highBad))
-    inner = setdiff(bad, [1, n])
+    inner = nearRows === :movingNu ? Int[] : setdiff(bad, [1, n])
     if !isempty(inner)
         fr = recipes[fallback]
         F0 = flexOPTSHMatrix(fr, m0)
@@ -263,7 +285,7 @@ function shShellSystem(config, recipes, model, seg, l; closure=:dsmHalf, fallbac
         # native flexOPT half-element rows; whole-row scaling does not change
         # the generalized eigenvalues, so no rescaling is needed
         haskey(recipes, clipBase) || error("closure (:clipped, p) needs the base recipe $clipBase")
-        clipRec = shRecipe(shClippedBoundaryConfig(clipConfig; p=closure[2]))
+        clipRec = shRecipe(shClippedBoundaryConfig(clipConfig; p=closure[2], refPoints=clipRefPoints))
         rows = shClippedBoundaryRows(clipRec, model, seg, l)
         A0[n, :] .= rows.top.A0;    M[n, :] .= rows.top.M
         A0[1, :] .= rows.bottom.A0; M[1, :] .= rows.bottom.M
@@ -300,7 +322,7 @@ DSM (natural BC) as reference.  Returns a vector of NamedTuples.
 function shShellEigenBenchmark(configs; l=10, ρ=3.3, β=4.5, R=6371.0, rcmb=3480.0,
                                nIntervals=[50, 100, 200, 400],
                                closures=[:dsmHalf, (:traction, 2), (:traction, 4)],
-                               nModes=8)
+                               nModes=8, nearRows=:fallback, clipRefPoints=:extended)
     model = layeredSHModel(; R=R, radii=[rcmb, R], ρ=[ρ], Vsv=[β], Vsh=[β])
     a, b = rcmb / R, 1.0
     kexact = shellToroidalRoots(l, a, b; kmax=80.0)
@@ -327,9 +349,10 @@ function shShellEigenBenchmark(configs; l=10, ρ=3.3, β=4.5, R=6371.0, rcmb=348
         for c in configs, cl in closures
             try
                 A0, M = shShellSystem(c, recipes, model, seg, l; closure=cl,
-                                      clipConfig=clipConfig)
+                                      clipConfig=clipConfig, nearRows=nearRows,
+                                      clipRefPoints=clipRefPoints)
                 ev = shEigenfrequencies(A0, M)
-                report(c.name, cl, n, seg.h_km, ev.Ω, ev.nComplex)
+                report(nearRows === :movingNu ? c.name * "+mν" : c.name, cl, n, seg.h_km, ev.Ω, ev.nComplex)
             catch err
                 @printf("%-8s %-14s n=%4d  FAILED: %s\n", c.name, string(cl), n,
                         first(sprint(showerror, err), 300))
