@@ -32,3 +32,8 @@ only calls existing src/ functions directly.
   PREM outer solid region joined at interfaces by adding half-element rows,
   per-scheme global T/H_L/H_N basis matrices, complex-frequency DSM sum over
   l and ω, inverse transform with e^{ω_I t}.
+- `sphericalTI_PSV.jl` -- P-SV Step P1 (notebooks/SphericalTI_PSV_oct2026.ipynb):
+  spheroidal projection of the TI operator (zonal jet), expected r²-weighted
+  radial forms, Cartesian m ≠ 0 check, fluid equation in Q = P/ω
+  (Geller & Ohminato 1994), famousEquation entries "1DsphericalPSV_TI_Freq"
+  and "1DsphericalFluidQ_Freq".

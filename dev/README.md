@@ -9,7 +9,9 @@ notebooks are not touched.
 | sub-project | from notebook | steps |
 |---|---|---|
 | `kirishima_oct2026/` | `notebooks/Elastic2DtopoBenchmark_oct2026.ipynb` | `step1`, `step2` (cases `homog`, `heter`) |
-| `spherical1Delastic/` | `notebooks/SphericalTI_SH_oct2026.ipynb` | `step1`, `step2`, `step3a`, `step3a1`, `step3a2`, `step3b` |
+| `spherical1Delastic/` | `notebooks/SphericalTI_SH_oct2026.ipynb`, `notebooks/SphericalTI_PSV_oct2026.ipynb` | SH: `step1`, `step2`, `step3a`, `step3a1`, `step3a2`, `step3b`; P-SV: `p1`, `p2`, `p5` |
+
+`spherical1Delastic/lib/` is the single source of the 1-D spherical elastic code (SH, P-SV, fluid in Q = P/ω, recipes, conventional DSM, global systems, synthetics); `helpers/sphericalTI_*.jl` only forward to it.
 
 ## Running
 
@@ -19,6 +21,7 @@ From the repository root:
 julia --project=. dev/kirishima_oct2026/run.jl step2 heter
 julia --project=. dev/kirishima_oct2026/run.jl step2 --redo=opt          # recompute the OPT family only
 julia --project=. dev/spherical1Delastic/run.jl step3b --redo=spectra
+julia --project=. dev/spherical1Delastic/run.jl p5                        # P-SV + SH, 3 components
 julia --project=. dev/spherical1Delastic/run.jl all 2>&1 | tee dev/spherical1Delastic/outputs/all.log
 ```
 

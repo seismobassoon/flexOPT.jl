@@ -61,12 +61,15 @@ function plotShellEigen(rows; modes=(1, 5), title="")
     return fig
 end
 
-function plotRecordSection(traces, θdeg; keys=("DSMconv_ref", "DSMconv", "OPT3", "OPT5"), tmax=2000.0, title="")
+# max amplitude of the section = gain × station spacing (1.5–2 is the usual choice)
+function plotRecordSection(traces, θdeg; keys=("DSMconv_ref", "DSMconv", "OPT3", "OPT5"), tmax=2000.0, title="", gain=1.5)
     fig = Figure(size=(1100, 900))
-    ax = Axis(fig[1, 1]; xlabel="time (s)", ylabel="epicentral distance (°)", title="SH (u_φ), f_y = 1 at 590 km, PREM " * title)
+    Δθ = length(θdeg) > 1 ? minimum(diff(sort(collect(θdeg)))) : 10.0
+    ax = Axis(fig[1, 1]; xlabel="time (s)", ylabel="epicentral distance (°)",
+              title="SH (u_φ), f_y = 1 at 590 km, PREM " * title * "  [max amplitude = $(gain) × $(Δθ)°]")
     ref = traces[first(keys)]
     sel = ref.t .<= tmax
-    scale = 4.0 / maximum(abs.(ref.traces[sel, :]))
+    scale = gain * Δθ / maximum(abs.(ref.traces[sel, :]))
     colors = (:black, :orange, :dodgerblue, :crimson)
     for (ik, k) in enumerate(keys)
         tr = traces[k]
@@ -77,4 +80,41 @@ function plotRecordSection(traces, θdeg; keys=("DSMconv_ref", "DSMconv", "OPT3"
     end
     axislegend(ax; position=:rb)
     devSave(fig, "record_section " * title); return fig
+end
+
+"""
+    plotRecordSection3C(tracesByKey, θdeg; force, keys=..., tmax=2000.0, gain=1.5)
+
+Three panels Z (u_r), R (u_θ), T (u_φ).  Per component one common scale for
+all schemes: the largest |amplitude| of the reference (first key) is drawn as
+`gain` × station spacing.  A component that is identically zero for this
+source (e.g. T for f_z at the pole) is labelled and left empty.
+"""
+function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DSMconv", "OPT3", "OPT5"),
+                             tmax=2000.0, gain=1.5, colors=(:black, :orange, :dodgerblue, :crimson))
+    Δθ = length(θdeg) > 1 ? minimum(diff(sort(collect(θdeg)))) : 10.0
+    fig = Figure(size=(1800, 1000))
+    for (ic, (comp, cname)) in enumerate(((:Z, "vertical u_r"), (:R, "radial u_θ"), (:T, "transverse u_φ")))
+        ref = getfield(tracesByKey[first(keys)], comp)
+        sel = ref.t .<= tmax
+        mx = maximum(abs.(ref.traces[sel, :]))
+        ax = Axis(fig[1, ic]; xlabel="time (s)", ylabel=ic == 1 ? "epicentral distance (°)" : "",
+                  title="$(cname), $(force) = 1 at 590 km, PREM  [max = $(gain) × $(Δθ)°]")
+        if mx == 0 || !isfinite(mx)
+            text!(ax, 0.5, 0.5; text="identically zero for this source", space=:relative, align=(:center, :center))
+            continue
+        end
+        scale = gain * Δθ / mx
+        for (ik, k) in enumerate(keys)
+            tr = getfield(tracesByKey[k], comp)
+            for (ir, θ) in enumerate(θdeg)
+                lines!(ax, tr.t[sel], θ .+ scale .* tr.traces[sel, ir];
+                       color=colors[mod1(ik, length(colors))], linewidth=ik == 1 ? 2 : 1,
+                       label=(ir == 1 && ic == 1) ? k : nothing)
+            end
+        end
+        ic == 1 && axislegend(ax; position=:rb)
+    end
+    devSave(fig, "record_section_3C_$(force)")
+    return fig
 end

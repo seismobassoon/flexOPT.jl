@@ -9,6 +9,10 @@
 #   step3a1  3a′: clipped closures                    (stages/step3a1_clipped.jl)
 #   step3a2  3a″: fallback vs moving ν                (stages/step3a2_movingnu.jl)
 #   step3b   PREM SH seismograms                      (stages/step3b_seismograms.jl)
+#   p1       P-SV + fluid (Q = P/ω) symbolic checks     (stages/p1_symbolic.jl)
+#   p2       P-SV/fluid operators vs DSM on PREM zones, and exact
+#            fluid-core + mantle eigenfrequencies       (stages/p2_checks.jl)
+#   p5       PREM 3-component seismograms, f_z and f_y  (stages/p5_seismograms.jl)
 #
 # From a terminal, in the repository root:
 #   julia --project=. dev/spherical1Delastic/run.jl step3b
@@ -19,6 +23,7 @@
 #   spherical("step3a2", "--redo=eigen")          # afterwards
 # Figures: dev/spherical1Delastic/outputs/<step>/
 # --redo= stage names: cartesian, convergence, exactness, zones, eigen, systems, spectra, all
+# Code: lib/*.jl (helpers/sphericalTI_*.jl only forward there).
 
 include(joinpath(@__DIR__, "..", "common", "devBootstrap.jl"))
 SPH_STAGES = joinpath(@__DIR__, "stages")
@@ -31,9 +36,12 @@ SPH_STEP_FILES = Dict(
     "step3a1" => "step3a1_clipped.jl",
     "step3a2" => "step3a2_movingnu.jl",
     "step3b"  => "step3b_seismograms.jl",
+    "p1"      => "p1_symbolic.jl",
+    "p2"      => "p2_checks.jl",
+    "p5"      => "p5_seismograms.jl",
 )
 DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS;
-    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b"], defaultStep="step3b")
+    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b", "p1", "p2", "p5"], defaultStep="p5")
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("spherical1Delastic dev run: ", DEV)
 
