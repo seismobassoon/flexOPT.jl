@@ -23,6 +23,7 @@ deps/
 logs/
 data/
 
+tmp/*
 */tmp/*
 *.jld2
 # VSCode
