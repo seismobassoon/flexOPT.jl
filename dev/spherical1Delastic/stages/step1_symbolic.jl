@@ -19,7 +19,7 @@ println("E_θ  = ", sym.E[2])
 println("\nR(r) = ∫ C*·(ρω²u + ∇·σ) dΩ =\n", sym.R)
 println("\nexpected =\n", sym.expected)
 println("\nsymbolic R - expected (expanded, ×r³) = ",
-        Symbolics.expand(sym.R * x^3 - sym.expected * x^3))
+    Symbolics.expand(sym.R * x^3 - sym.expected * x^3))
 for l in (1, 2, 5, 20)
     @show l verifyToroidalProjection(; l=l)
 end
@@ -56,7 +56,7 @@ println("\nexpected: (1,) => -Lr²∂W + Lr W ;  (0,) => Lr ∂W, ω²ρr² W, -
 let s = sym.symbols
     @variables ρr²(x) Lr²(x) Lr(x) Nₗ(x) ω
     e = substitute(eqSH.exprs, Dict(ρr² => s.ρ * x^2, Lr² => s.L * x^2, Lr => s.L * x,
-                                    Nₗ => s.L + (s.Λ - 2) * s.N))
+        Nₗ => s.L + (s.Λ - 2) * s.N))
     e = substitute(e, Dict(ω => s.ω))
     diff = Symbolics.expand(expand_derivatives(e) - x^2 * sym.expected)
     println("x·(entry(geometric fields) - r²·expected) = ", Symbolics.expand(x * diff))
