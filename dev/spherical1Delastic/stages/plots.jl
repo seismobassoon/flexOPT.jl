@@ -91,7 +91,12 @@ all schemes: the largest |amplitude| of the reference (first key) is drawn as
 source (e.g. T for f_z at the pole) is labelled and left empty.
 """
 function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DSMconv", "OPT3", "OPT5"),
-                             tmax=2000.0, gain=1.5, colors=(:black, :orange, :dodgerblue, :crimson))
+                             tmax=2000.0, gain=2.0, normalize=:trace,
+                             colors=(:black, :orange, :dodgerblue, :crimson))
+    # normalize = :trace  -> each station scaled by ITS OWN max |reference trace| (same
+    #                         factor for every scheme at that station, so they stay comparable)
+    # normalize = :global -> one factor per component (largest reference trace)
+    # either way the scaled peak is gain × station spacing
     Δθ = length(θdeg) > 1 ? minimum(diff(sort(collect(θdeg)))) : 10.0
     fig = Figure(size=(1800, 1000))
     for (ic, (comp, cname)) in enumerate(((:Z, "vertical u_r"), (:R, "radial u_θ"), (:T, "transverse u_φ")))
@@ -99,22 +104,25 @@ function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DS
         sel = ref.t .<= tmax
         mx = maximum(abs.(ref.traces[sel, :]))
         ax = Axis(fig[1, ic]; xlabel="time (s)", ylabel=ic == 1 ? "epicentral distance (°)" : "",
-                  title="$(cname), $(force) = 1 at 590 km, PREM  [max = $(gain) × $(Δθ)°]")
+                  title="$(cname), $(force) = 1 at 590 km, PREM  [$(normalize) max = $(gain) × $(Δθ)°]")
         if mx == 0 || !isfinite(mx)
             text!(ax, 0.5, 0.5; text="identically zero for this source", space=:relative, align=(:center, :center))
             continue
         end
-        scale = gain * Δθ / mx
+        stationMax = [maximum(abs.(@view ref.traces[sel, ir])) for ir in eachindex(θdeg)]
+        scales = normalize === :trace ?
+            [m > 1e-12 * mx ? gain * Δθ / m : 0.0 for m in stationMax] :   # nodal stations stay flat
+            fill(gain * Δθ / mx, length(θdeg))
         for (ik, k) in enumerate(keys)
             tr = getfield(tracesByKey[k], comp)
             for (ir, θ) in enumerate(θdeg)
-                lines!(ax, tr.t[sel], θ .+ scale .* tr.traces[sel, ir];
+                lines!(ax, tr.t[sel], θ .+ scales[ir] .* tr.traces[sel, ir];
                        color=colors[mod1(ik, length(colors))], linewidth=ik == 1 ? 2 : 1,
                        label=(ir == 1 && ic == 1) ? k : nothing)
             end
         end
         ic == 1 && axislegend(ax; position=:rb)
     end
-    devSave(fig, "record_section_3C_$(force)")
+    devSave(fig, "record_section_3C_$(force)_$(normalize)")
     return fig
 end

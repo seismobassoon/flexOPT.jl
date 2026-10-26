@@ -69,7 +69,8 @@ p5Traces = Dict((k, f) => elasticTimeSeries(p5Spectra[k][f]; np=4096, taper=0.2)
                 for k in p5SpectraParams["keys"] for f in keys(p5Forces))
 for f in sort(collect(keys(p5Forces)))
     plotRecordSection3C(Dict(k => p5Traces[(k, f)] for k in p5SpectraParams["keys"]),
-                        collect(p5SpectraParams["receiversθdeg"]); force=f, gain=1.5)
+                        collect(p5SpectraParams["receiversθdeg"]); force=f,
+                        normalize=:trace, gain=2.0)   # each station: peak = 2 × 10°
     let ref = p5Traces[("DSMconv_ref", f)]
         for comp in (:Z, :R, :T)
             r = getfield(ref, comp); sel = r.t .<= 2000.0
