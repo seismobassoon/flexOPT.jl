@@ -92,7 +92,8 @@ source (e.g. T for f_z at the pole) is labelled and left empty.
 """
 function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DSMconv", "OPT3", "OPT5"),
                              tmax=2000.0, gain=2.0, normalize=:trace,
-                             colors=(:black, :orange, :dodgerblue, :crimson))
+                             colors=(:black, :orange, :dodgerblue, :crimson),
+                             sourceLabel="$(force) = 1 at 590 km", fileTag=String(force))
     # normalize = :trace  -> each station scaled by ITS OWN max |reference trace| (same
     #                         factor for every scheme at that station, so they stay comparable)
     # normalize = :global -> one factor per component (largest reference trace)
@@ -104,7 +105,7 @@ function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DS
         sel = ref.t .<= tmax
         mx = maximum(abs.(ref.traces[sel, :]))
         ax = Axis(fig[1, ic]; xlabel="time (s)", ylabel=ic == 1 ? "epicentral distance (°)" : "",
-                  title="$(cname), $(force) = 1 at 590 km, PREM  [$(normalize) max = $(gain) × $(Δθ)°]")
+                  title="$(cname), $(sourceLabel), PREM  [$(normalize) max = $(gain) × $(Δθ)°]")
         if mx == 0 || !isfinite(mx)
             text!(ax, 0.5, 0.5; text="identically zero for this source", space=:relative, align=(:center, :center))
             continue
@@ -123,6 +124,6 @@ function plotRecordSection3C(tracesByKey, θdeg; force, keys=("DSMconv_ref", "DS
         end
         ic == 1 && axislegend(ax; position=:rb)
     end
-    devSave(fig, "record_section_3C_$(force)_$(normalize)")
+    devSave(fig, "record_section_3C_$(fileTag)_$(normalize)")
     return fig
 end

@@ -20,6 +20,9 @@ CODE_VERSION = Dict(
     "p2_coreMantle"     => "v1-2026-10-26",  # coreMantleEigenBenchmark (lib/elastic1D_checks.jl)
     "p5_systems"        => "v1-2026-10-26",  # elasticGlobalSystem (P-SV + SH)
     "p5_spectra"        => "v1-2026-10-26",  # elasticSynthetics
+    "p6_shell"          => "v1-2026-10-27",  # shellSourceConvergence (lib/sources1D.jl)
+    "p6_systems"        => "v1-2026-10-27",  # elasticGlobalSystem + anelasticSystems (P-SV + SH)
+    "p6_spectra"        => "v1-2026-10-27",  # pointSourceSynthetics (moment tensor, φ = 90°)
 )
 # myProduceOrLoad keeps these under DrWatson's datadir() = <repo>/data (git-ignored)
 SPH_CACHE_DIR = joinpath("dev", "spherical1Delastic")

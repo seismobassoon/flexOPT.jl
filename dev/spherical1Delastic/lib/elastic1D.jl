@@ -122,11 +122,12 @@ s = (ξ - ξ_bottom)/h: second-order fields unchanged, first-order × h,
 zeroth-order × h².  Also returns the indices of the first-order fields
 (negated when the segment is mirrored).
 """
-function zoneModelSets(kind::Symbol, model, seg)
+function zoneModelSets(kind::Symbol, model, seg; materials=elasticMaterials)
     ξ = seg.ξ; h = seg.hξ; n = length(ξ); z = zeros(n)
-    m = [elasticMaterials(model, seg.zone, x) for x in ξ]
+    m = [materials(model, seg.zone, x) for x in ξ]
     g(f) = getfield.(m, f)
-    ρ, A, C, F, L, N, λ = g(:ρ), g(:A), g(:C), g(:F), g(:L), g(:N), g(:λ)
+    ρ, A, C, F, L, N = g(:ρ), g(:A), g(:C), g(:F), g(:L), g(:N)
+    λinv, ρinv = _λinv.(m), _ρinv.(m)
     if kind === :SH          # (ρr², Lr², Lr, Nₗ, ω)
         sets = (T=Any[h^2 .* ρ .* ξ .^ 2, z, z, z, 1.0],
                 H0=Any[z, ξ .^ 2 .* L, h .* ξ .* L, h^2 .* (L .- 2N), 0.0],
@@ -142,14 +143,19 @@ function zoneModelSets(kind::Symbol, model, seg)
                 HΛ=Any[z, z, z, z, z, z, z, h^2 .* (-L), h^2 .* (-A), z, 0.0])
         return sets, [3, 5, 6, 7]
     elseif kind === :fluid   # (Pr², κr², Mₗ, ω)
-        sets = (T=Any[z, h^2 .* ξ .^ 2 ./ λ, z, 1.0],
-                H0=Any[ξ .^ 2 ./ ρ, z, z, 0.0],
+        sets = (T=Any[z, h^2 .* ξ .^ 2 .* λinv, z, 1.0],
+                H0=Any[ξ .^ 2 .* ρinv, z, z, 0.0],
                 Hk=nothing,
-                HΛ=Any[z, z, h^2 ./ ρ, 0.0])
+                HΛ=Any[z, z, h^2 .* ρinv, 0.0])
         return sets, Int[]
     end
     error("kind must be :SH, :PSV or :fluid")
 end
+
+# fluid coefficients 1/λ, 1/ρ; a material function may override them
+# (attenuation bases, lib/sources1D.jl); elasticMaterials does not
+_λinv(m) = hasproperty(m, :λinv) ? m.λinv : 1 / m.λ
+_ρinv(m) = hasproperty(m, :ρinv) ? m.ρinv : 1 / m.ρ
 
 _mirror(m, firstIdx) = Any[(i in firstIdx ? -1 : 1) .* (x isa AbstractArray ? reverse(x) : x)
                             for (i, x) in enumerate(m)]
@@ -169,9 +175,10 @@ field, mirrored recipe for the bottom.  Rows are divided by the recipe
 scale (σh; σ = 2 for strong-form FD, 1 otherwise).
 """
 function flexOPTZoneBasis(kind::Symbol, config, recipes, model, seg; configs,
-                          nearRows=:fallback, clipP=2, fallbackName="OPT3")
+                          nearRows=:fallback, clipP=2, fallbackName="OPT3",
+                          materials=elasticMaterials)
     eq = _equationOf(kind); nf = _nfields(kind); n = length(seg.ξ)
-    sets, firstIdx = zoneModelSets(kind, model, seg)
+    sets, firstIdx = zoneModelSets(kind, model, seg; materials=materials)
     base = getRecipe!(recipes, config, eq)
     rec = nearRows === :movingNu ?
         elasticRecipe(withRecipeExtras(config, Dict("nuGeometryMode" => :all)), eq) : base
@@ -219,7 +226,7 @@ Conventional DSM basis matrices (same keys and ordering as `flexOPTZoneBasis`):
 element-by-element Galerkin of the natural weak forms above (natural
 half-element rows at both ends).
 """
-function dsmZoneBasis(kind::Symbol, model, seg; nq=8)
+function dsmZoneBasis(kind::Symbol, model, seg; nq=8, materials=elasticMaterials)
     nf = _nfields(kind); ξn = seg.ξ; n = length(ξn)
     B = Dict(key => zeros(nf * n, nf * n) for key in (:T, :H0, :Hk, :HΛ))
     q, w = gaussLegendre(nq)
@@ -228,7 +235,7 @@ function dsmZoneBasis(kind::Symbol, model, seg; nq=8)
         a, b = ξn[e], ξn[e+1]; he = b - a
         for (qk, wk) in zip(q, w)
             x = (a + b) / 2 + he / 2 * qk; wt = wk * he / 2
-            M = elasticMaterials(model, seg.zone, x)
+            M = materials(model, seg.zone, x)
             X = ((b - x) / he, (x - a) / he); dX = (-1 / he, 1 / he)
             for i in 1:2, j in 1:2
                 I, J = e + i - 1, e + j - 1
@@ -239,9 +246,9 @@ function dsmZoneBasis(kind::Symbol, model, seg; nq=8)
                                           Xi * (x * M.L * dXj + (-M.L + 2M.N) * Xj))
                     B[:HΛ][I, J] += wt * (-M.N * Xi * Xj)
                 elseif kind === :fluid
-                    B[:T][I, J] += wt * x^2 / M.λ * Xi * Xj
-                    B[:H0][I, J] += wt * (-(x^2 / M.ρ) * dXi * dXj)
-                    B[:HΛ][I, J] += wt * (-(1 / M.ρ) * Xi * Xj)
+                    B[:T][I, J] += wt * x^2 * _λinv(M) * Xi * Xj
+                    B[:H0][I, J] += wt * (-(x^2 * _ρinv(M)) * dXi * dXj)
+                    B[:HΛ][I, J] += wt * (-_ρinv(M) * Xi * Xj)
                 else
                     A_, C_, F_, L_, N_ = M.A, M.C, M.F, M.L, M.N
                     B[:T][iU(I), iU(J)] += wt * M.ρ * x^2 * Xi * Xj
@@ -301,7 +308,8 @@ continuity of the fluxes); solid–fluid interfaces carry separate unknowns
 and the G&O coupling terms.
 """
 function elasticGlobalSystem(kind::Symbol, model, grid; scheme="DSMconv", configs=nothing,
-                             recipes=Dict{Any,Any}(), nearRows=:fallback, label=scheme)
+                             recipes=Dict{Any,Any}(), nearRows=:fallback, label=scheme,
+                             materials=elasticMaterials)
     kind in (:SH, :PSV) || error("kind must be :SH or :PSV")
     segs = grid.segments
     dofmap = Matrix{Int}[]
@@ -330,8 +338,9 @@ function elasticGlobalSystem(kind::Symbol, model, grid; scheme="DSMconv", config
     end
     for (iz, seg) in enumerate(segs)
         zk = zoneKinds[iz]
-        Bz = scheme == "DSMconv" ? dsmZoneBasis(zk, model, seg) :
-             flexOPTZoneBasis(zk, config, recipes, model, seg; configs=configs, nearRows=nearRows)
+        Bz = scheme == "DSMconv" ? dsmZoneBasis(zk, model, seg; materials=materials) :
+             flexOPTZoneBasis(zk, config, recipes, model, seg; configs=configs, nearRows=nearRows,
+                              materials=materials)
         g = vec(permutedims(dofmap[iz]))        # local field-major index → global dof
         for key in (:T, :H0, :Hk, :HΛ)
             I, J, V = findnz(sparse(Bz[key]))
