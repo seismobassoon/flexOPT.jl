@@ -28,6 +28,7 @@ sphLoadHelpers && include(joinpath(SPH_LIB, "sphericalTI_PSV.jl"))
 sphLoadHelpers && include(joinpath(SPH_LIB, "elastic1D.jl"))
 sphLoadHelpers && include(joinpath(SPH_LIB, "elastic1D_checks.jl"))
 sphLoadHelpers && include(joinpath(SPH_LIB, "sources1D.jl"))
+sphLoadHelpers && include(joinpath(SPH_LIB, "nearBoundary1D.jl"))
 using CairoMakie
 CairoMakie.activate!(type="png")
 SPHERICAL_ENV = true

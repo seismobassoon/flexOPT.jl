@@ -854,7 +854,8 @@ function prepareNumericalOperatorGeometry(
         modelPoints = (modelPoints..., 1)
 
         lhs_CartesianDependencies = vcat(lhs.CartesianDependencies,zeros(Int, 1, NtypeofMaterialVariables),)
-        rhs_CartesianDependencies = vcat(rhs.CartesianDependencies,zeros(Int, 1, NtypeofFields),)
+        # one column per RHS coefficient variable (extvars), not per force field
+        rhs_CartesianDependencies = vcat(rhs.CartesianDependencies,zeros(Int, 1, size(rhs.CartesianDependencies, 2)),)
 
         for iGeometry in 1:nGeometry
             localPointsIndices[iGeometry] = [SVector{newD,Int}(p..., 1) for p in nodes[iGeometry]]

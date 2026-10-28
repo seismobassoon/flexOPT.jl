@@ -2,8 +2,12 @@
 # Ported from notebooks/Elastic2DtopoBenchmark_oct2026.ipynb, cell step2-*-specfem (run part).
 # Runs ONLY on a cache miss of step2_specfem.jl; its last expression is the Dict saved.
 dtSPECFEM = dtOPT
+# caseDirectoryTag keeps different steps' SPECFEM2D working directories
+# apart (Step 2: "no_free_surface"; Step 3: "flat_free_surface", set in
+# step3_config.jl) without needing a per-step copy of this file.
+caseDirectoryTag = @isdefined(caseDirectoryTag) ? caseDirectoryTag : "no_free_surface"
 caseDirectory = joinpath(flexopt_root, "data", "specfem2d_benchmarks",
-    "$(caseLabel)_kirishima_no_free_surface")
+    "$(caseLabel)_kirishima_$(caseDirectoryTag)")
 solidZ = applyFreeSurface ? findall(z .<= 0.0) : collect(eachindex(z))
 zSPECFEM = z[solidZ]
 vp = vpField[:, solidZ]

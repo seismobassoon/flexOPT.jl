@@ -164,6 +164,40 @@ _equationOf(kind) = kind === :SH ? SH_EQUATION : kind === :PSV ? PSV_EQUATION : 
 _nfields(kind) = kind === :PSV ? 2 : 1
 
 """
+    nearBoundaryConfig(base; j, P=base.pointsInSpace, degree=P-1)
+
+Recipe for the row j nodes inside a segment end (j = 0: the end row), with
+the interior scheme's reference size P and Taylor exactness (degree P-1, 4
+for OPT5) instead of the OPT3 ones:
+  j = 0   the clipped half-element recipe (`shClippedBoundaryConfig`, p = P:
+          test centre ν = P, reference nodes 1..P+1, test integral clipped
+          at the end);
+  j ≥ 1   test centre ν = P - j, reference nodes 1..P (all inside the
+          segment, one-sided), full test support.
+Written for the top end; the bottom end uses the mirrored segment.
+"""
+function nearBoundaryConfig(base; j::Integer, P::Integer=base.pointsInSpace, degree::Integer=P - 1)
+    base.orderBspace == -1 && error("near-boundary recipes need a weak-form base (OPT3/4/5)")
+    # end row: OPT3 keeps its p = 2 half element (p = 3, degree 2 converges worse,
+    # p7 2026-10-28); P ≥ 4 uses the scheme's own size and degree
+    j == 0 && return P <= 3 ? shClippedBoundaryConfig(base; p=2) :
+                              shClippedBoundaryConfig(base; p=P, degree=degree)
+    0 < j < P - 1 || error("j = $(j) must be in 1:$(P - 2)")
+    ν = P - j
+    return (name="$(base.name)_nb$(P)_j$(j)_d$(degree)", orderBtime=base.orderBtime,
+            orderBspace=base.orderBspace, pointsInSpace=P,
+            pointsInTime=base.pointsInTime, supplementaryOrder=base.supplementaryOrder,
+            fieldItpl=(ptsSpace=P, ptsTime=1, offsetSpace=0.0, offsetTime=1,
+                       YorderBspace=1, YorderBtime=base.fieldItpl.YorderBtime),
+            materItpl=merge(base.materItpl, (offsetSpace=Float64(ν - 1),)),
+            extra=Dict{String,Any}(
+                "nuCentre" => (ν,),
+                "trialFunctionRefPoints" => (Tuple(1:P),),
+                "testIntegrationBounds" => ((1.0, Float64(P)),),
+                "exactTaylorTotalDegree" => degree))
+end
+
+"""
     flexOPTZoneBasis(kind, config, recipes, model, seg; configs, nearRows=:fallback,
                      clipP=2, fallbackName="OPT3")
 
@@ -171,12 +205,16 @@ Basis matrices (Dict :T, :H0, :Hk, :HΛ; field-major, K_ξ scale) of one zone:
 the scheme's recipe in the interior, OPT3 rows where its stencil cannot
 reach (`nearRows = :fallback`) or moving ν (`:movingNu`), native clipped
 half-element rows (p = clipP, from OPT3 parameters) at both ends of every
-field, mirrored recipe for the bottom.  Rows are divided by the recipe
+field, mirrored recipe for the bottom; or (`:clippedFamily`) the scheme's own
+near-boundary recipes for every row its stencil cannot serve, end row included
+(`nearBoundaryConfig`).  Rows are divided by the recipe
 scale (σh; σ = 2 for strong-form FD, 1 otherwise).
 """
 function flexOPTZoneBasis(kind::Symbol, config, recipes, model, seg; configs,
                           nearRows=:fallback, clipP=2, fallbackName="OPT3",
                           materials=elasticMaterials)
+    nearRows in (:fallback, :movingNu, :clippedFamily) ||
+        error("nearRows must be :fallback, :movingNu or :clippedFamily")
     eq = _equationOf(kind); nf = _nfields(kind); n = length(seg.ξ)
     sets, firstIdx = zoneModelSets(kind, model, seg; materials=materials)
     base = getRecipe!(recipes, config, eq)
@@ -184,15 +222,23 @@ function flexOPTZoneBasis(kind::Symbol, config, recipes, model, seg; configs,
         elasticRecipe(withRecipeExtras(config, Dict("nuGeometryMode" => :all)), eq) : base
     fbConfig = only(filter(c -> c.name == fallbackName, configs))
     fbRec = getRecipe!(recipes, fbConfig, eq)
-    clipRec = elasticRecipe(shClippedBoundaryConfig(fbConfig; p=clipP), eq)
     σ = config.orderBspace == -1 ? 2.0 : 1.0
     offs = recipeOffsets(base)
+    Jtop = max(maximum(offs), 1); Jbot = max(-minimum(offs), 1)   # rows to replace at each end
     bad = union(collect(1:(-minimum(offs))), collect((n - maximum(offs) + 1):n))
-    inner = nearRows === :movingNu ? Int[] : setdiff(bad, [1, n])
+    inner = nearRows === :fallback ? setdiff(bad, [1, n]) : Int[]
+    # :clippedFamily -- row j (0 = end row) from the end: the scheme's own
+    # near-boundary recipe (nearBoundaryConfig), bottom rows from the mirrored segment
+    famRecs = nearRows === :clippedFamily ?
+        [getRecipe!(recipes, nearBoundaryConfig(config; j=j), eq) for j in 0:max(Jtop, Jbot)-1] :
+        [getRecipe!(recipes, shClippedBoundaryConfig(fbConfig; p=clipP), eq)]
+    nTop = nearRows === :clippedFamily ? Jtop : 1
+    nBot = nearRows === :clippedFamily ? Jbot : 1
+    n >= 2 * max(nTop, nBot) + 1 || error("segment too short ($(n) nodes) for the near-boundary rows")
     rowsOf(nodes) = [(f - 1) * n + i for f in 1:nf for i in nodes]
     scale = fill(σ * seg.hξ, nf * n)
     scale[rowsOf(inner)] .= seg.hξ
-    scale[rowsOf([1, n])] .= seg.hξ
+    scale[rowsOf(vcat(collect(1:nBot), collect(n-nTop+1:n)))] .= seg.hξ
     out = Dict{Symbol,Matrix{Float64}}()
     for key in (:T, :H0, :Hk, :HΛ)
         m = getfield(sets, key)
@@ -204,11 +250,14 @@ function flexOPTZoneBasis(kind::Symbol, config, recipes, model, seg; configs,
             Fb = flexOPTOperator(fbRec, m, nf)
             r = rowsOf(inner); A[r, :] .= Fb[r, :]
         end
-        top = flexOPTOperator(clipRec, m, nf)
-        bot = flexOPTOperator(clipRec, _mirror(m, firstIdx), nf)
-        for f in 1:nf
-            A[(f-1)*n+n, :] .= top[(f-1)*n+n, :]
-            A[(f-1)*n+1, :] .= _reverseBlocks(bot[(f-1)*n+n, :], nf, n)
+        for (jj, fr) in enumerate(famRecs)
+            j = jj - 1
+            top = flexOPTOperator(fr, m, nf)
+            bot = flexOPTOperator(fr, _mirror(m, firstIdx), nf)
+            for f in 1:nf
+                j < nTop && (A[(f-1)*n+n-j, :] .= top[(f-1)*n+n-j, :])
+                j < nBot && (A[(f-1)*n+1+j, :] .= _reverseBlocks(bot[(f-1)*n+n-j, :], nf, n))
+            end
         end
         out[key] = A ./ scale
     end

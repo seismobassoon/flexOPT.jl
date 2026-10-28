@@ -166,7 +166,10 @@ function flexOPT.famousEquation(::Val{:eq_1DsphericalSH_TI_Freq_src})
     vars = (ρr², Lr², Lr, Nₗ, ω)
     extexprs = fr² - ∂x(gr²)
     extfields = (fr², gr²)
-    extvars = (fr², gr²)
+    # one RHS variable only: the coefficients of fr² and ∂x(gr²) are pure numbers,
+    # and src/fullyNumericalOPT/makeCostFunctions.jl (frequency branch, ~l. 857)
+    # pads rhs.CartesianDependencies with NtypeofFields (= 1) columns
+    extvars = fr²
     coordinates = (x,)
     ∂, ∂² = usefulPartials(coordinates)
     return exprs, fields, vars, extexprs, extfields, extvars, coordinates, ∂, ∂²
@@ -268,7 +271,7 @@ for each scheme's own Γ (`gammas[scheme]`, p = sourceOrderOf(scheme)); p = noth
 function shellSourceConvergence(schemes; configs, methods, l=10, kΩ=20.3, ρ=3.3, β=4.5,
                                  R=6371.0, rcmb=3480.0, depth=590.0,
                                  nIntervals=[50, 100, 200, 400], recipes=Dict{Any,Any}(),
-                                 gammas=Dict{String,Any}())
+                                 gammas=Dict{String,Any}(), nearRows=:fallback)
     model = layeredPSVModel(; R=R, radii=[rcmb, R], ρ=[ρ], Vp=[sqrt(3) * β], Vs=[β])
     a = rcmb / R; ξs = (R - depth) / R; Ω = kΩ * β
     ex = shellSourceGreen(Ω, l, ξs; a=a, ρ=ρ, β=β)
@@ -277,7 +280,8 @@ function shellSourceConvergence(schemes; configs, methods, l=10, kΩ=20.3, ρ=3.
     for n in nIntervals
         grid = elasticRadialGrid(model; h=(R - rcmb) / n, region=:outerSolid, minIntervals=4)
         for sc in schemes
-            sys = elasticGlobalSystem(:SH, model, grid; scheme=sc, configs=configs, recipes=recipes)
+            sys = elasticGlobalSystem(:SH, model, grid; scheme=sc, configs=configs, recipes=recipes,
+                                      nearRows=nearRows)
             Kf = lu(elasticOperator(sys, Ω, l)); Ws = surfaceDofs(sys)[1]
             for mt in methods
                 label, meth, p = mt[1], mt[2], mt[3]

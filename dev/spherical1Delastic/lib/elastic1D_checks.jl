@@ -117,7 +117,7 @@ clipped half rows at both ends of both zones and the G&O coupling.
 """
 function coreMantleEigenBenchmark(schemes; configs, l=2, nIntervals=[30, 60, 120], nModes=3,
                                   a=0.546, ρF=10.0, αF=9.0, ρS=4.5, αS=11.0, βS=6.0,
-                                  recipes=Dict{Any,Any}())
+                                  recipes=Dict{Any,Any}(), nearRows=:fallback)
     R = 6371.0
     model = layeredPSVModel(; R=R, radii=[0.0, a * R, R], ρ=[ρF, ρS], Vp=[αF, αS], Vs=[0.0, βS])
     @show model.solid_or_fluid
@@ -128,7 +128,8 @@ function coreMantleEigenBenchmark(schemes; configs, l=2, nIntervals=[30, 60, 120
     for n in nIntervals
         grid = elasticRadialGrid(model; h=(a * R) / n, region=:all)
         for sc in schemes
-            sys = elasticGlobalSystem(:PSV, model, grid; scheme=sc, configs=configs, recipes=recipes)
+            sys = elasticGlobalSystem(:PSV, model, grid; scheme=sc, configs=configs, recipes=recipes,
+                                      nearRows=nearRows)
             ev = quadraticEigenfrequencies(sys, l)
             err = [(ev.Ω[argmin(abs.(ev.Ω .- w))] - w) / w for w in exact[1:nModes]]
             push!(out, (scheme=sc, n=n, relErr=err, maxImRatio=ev.maxImRatio))

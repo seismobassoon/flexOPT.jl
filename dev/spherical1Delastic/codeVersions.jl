@@ -23,6 +23,10 @@ CODE_VERSION = Dict(
     "p6_shell"          => "v1-2026-10-27",  # shellSourceConvergence (lib/sources1D.jl)
     "p6_systems"        => "v1-2026-10-27",  # elasticGlobalSystem + anelasticSystems (P-SV + SH)
     "p6_spectra"        => "v1-2026-10-27",  # pointSourceSynthetics (moment tensor, φ = 90°)
+    "p7_rows"           => "v2-2026-10-28",  # shellRowResiduals (lib/nearBoundary1D.jl)
+    "p7_eigen"          => "v2-2026-10-28",  # shellEigenNearRows
+    "p7_sources"        => "v2-2026-10-28",  # shellSourceConvergence per nearRows variant
+    "p7_coreMantle"     => "v2-2026-10-28",  # coreMantleEigenBenchmark per nearRows variant
 )
 # myProduceOrLoad keeps these under DrWatson's datadir() = <repo>/data (git-ignored)
 SPH_CACHE_DIR = joinpath("dev", "spherical1Delastic")

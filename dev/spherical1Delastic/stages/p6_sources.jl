@@ -135,7 +135,10 @@ p6Spectra = myProduceOrLoad(p6SpectraParams, SPH_CACHE_DIR, "p6_spectra") do cfg
 end
 
 p6Classic = Dict{String,Any}()
-for (case, tag) in (("elastic", "classic DSM"), ("anelastic", "classic DSM+Q"))
+# "classic DSM": tish/tipsv with the zero frequency computed (dc_*, the reference);
+# "classic DSM no ω=0": the codes as distributed (i = 0 skipped → late trend near the source)
+for (case, tag) in (("dc_elastic", "classic DSM"), ("dc_anelastic", "classic DSM+Q"),
+                    ("elastic", "classic DSM no ω=0"), ("anelastic", "classic DSM no ω=0+Q"))
     dir = joinpath(CLASSIC_DIR, case)
     if isdir(dir)
         p6Classic[tag] = classicSpectra(dir, p6θ)
@@ -150,7 +153,7 @@ for (suffix, ctag) in (("", "classic DSM"), ("+Q", "classic DSM+Q"))
     refs = [(ctag, get(p6Classic, ctag, nothing)), ("DSMconv_ref" * suffix, get(p6Spectra, "DSMconv_ref" * suffix, nothing))]
     for (rname, ref) in refs
         isnothing(ref) && continue
-        for k in ("DSMconv", "OPT3", "OPT5", "DSMconv_ref", "classic DSM")
+        for k in ("DSMconv", "OPT3", "OPT5", "DSMconv_ref", "classic DSM", "classic DSM no ω=0")
             key = k == "classic DSM" ? ctag : k * suffix
             (key == rname || !(haskey(p6Spectra, key) || haskey(p6Classic, key))) && continue
             A = haskey(p6Spectra, key) ? p6Spectra[key] : p6Classic[key]
@@ -165,13 +168,17 @@ if haskey(p6Spectra, "OPT5") && haskey(p6Spectra, "OPT5+Q")
 end
 
 # time domain: record sections and misfits over 0-2000 s
+# the cached Dict may also carry non-spectrum entries (e.g. metadata strings): keep spectra only
+filter!(kv -> kv[2] isa NamedTuple && hasproperty(kv[2], :ur), p6Spectra)
 p6Traces = Dict(k => elasticTimeSeries(v; np=4096, taper=0.2) for (k, v) in merge(p6Spectra, p6Classic))
 for (suffix, ctag, ftag) in (("", "classic DSM", "MT_elastic"), ("+Q", "classic DSM+Q", "MT_anelastic"))
-    keysPlot = Tuple(filter(k -> haskey(p6Traces, k), [ctag, "DSMconv" * suffix, "OPT3" * suffix, "OPT5" * suffix]))
+    keysPlot = Tuple(filter(k -> haskey(p6Traces, k), [ctag, "classic DSM no ω=0" * suffix,
+                                                        "DSMconv" * suffix, "OPT3" * suffix, "OPT5" * suffix]))
     length(keysPlot) < 2 && continue
     for norm_ in (:trace, :global)
         plotRecordSection3C(Dict(k => p6Traces[k] for k in keysPlot), collect(p6θ); force="MT",
                             keys=keysPlot, normalize=norm_, gain=2.0,
+                            colors=(:black, :gray60, :orange, :dodgerblue, :crimson),
                             sourceLabel="moment tensor at $(Int(p6Depth)) km" * (suffix == "" ? "" : ", Q"),
                             fileTag=ftag)
     end
@@ -193,6 +200,22 @@ if haskey(p6Traces, "OPT5") && haskey(p6Traces, "OPT5+Q")
 end
 
 # ---------------------------------------------------------------------------
+"Traces on t = 0:dt:tmax with a cosine taper fixed in frequency (f1 → f2), as shTimeSeries otherwise."
+function p6TracesFreqTaper(spec, comp; dt=0.8, tmax=2000.0, f1=0.04, f2=0.05)
+    U = getfield(spec, comp); f = spec.ω ./ 2π
+    w = [x <= f1 ? 1.0 : x >= f2 ? 0.0 : 0.5 * (1 + cos(π * (x - f1) / (f2 - f1))) for x in f]
+    t = collect(0:dt:tmax); Δω = 2π / spec.tlen
+    out = zeros(length(t), size(U, 2))
+    for ir in 1:size(U, 2), (it, tt) in enumerate(t)
+        acc = 0.5 * real(w[1] * U[1, ir])
+        for k in 2:length(f)
+            acc += real(w[k] * U[k, ir] * cis(spec.ω[k] * tt))
+        end
+        out[it, ir] = acc * Δω / π * exp(spec.ωI * tt)
+    end
+    return out
+end
+
 println("\n---- (d) wrap-around (tipsv, Z): same ω_I, reference with period 2·tlen")
 let wrapDir = joinpath(CLASSIC_DIR, "wrap"), θw = [40, 80, 120, 150, 170]
     if isdir(wrapDir)
@@ -200,11 +223,10 @@ let wrapDir = joinpath(CLASSIC_DIR, "wrap"), θw = [40, 80, 120, 150, 170]
         for (short, long, lab) in (("w2", "La", "ln 10^2"), ("w4", "Lb", "ln 10^4"), ("w6", "Lc", "ln 10^6"))
             A = classicSpectra(joinpath(wrapDir, short), θw; parts=("psv",))
             B = classicSpectra(joinpath(wrapDir, long), θw; parts=("psv",))
-            ta = elasticTimeSeries(A; np=4096, taper=0.2).Z     # dt = 0.8 s
-            tb = elasticTimeSeries(B; np=8192, taper=0.2).Z     # dt = 0.8 s
-            sel = ta.t .<= 2000.0
-            e = [maximum(abs.(ta.traces[sel, i] .- tb.traces[sel, i])) / maximum(abs.(tb.traces[sel, i]))
-                 for i in eachindex(θw)]
+            # the taper must be the SAME filter in frequency for both periods
+            # (a taper defined as a fraction of the samples differs by ~1 %)
+            ta = p6TracesFreqTaper(A, :ur); tb = p6TracesFreqTaper(B, :ur)
+            e = [maximum(abs.(ta[:, i] .- tb[:, i])) / maximum(abs.(tb[:, i])) for i in eachindex(θw)]
             @printf("%-12s %s\n", lab, join((@sprintf("%9.1e", x) for x in e), " "))
         end
         println("(max |difference| / max |trace| over 0-2000 s; ln 10^2 is the classic DSM default)")

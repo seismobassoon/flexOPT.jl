@@ -15,6 +15,9 @@
 #   p5       PREM 3-component seismograms, f_z and f_y  (stages/p5_seismograms.jl)
 #   p6       moment tensors: Γ stencils, exact δ/δ' check, PREM vs classic DSM
 #            (tish + tipsv), elastic and anelastic, wrap-around  (stages/p6_sources.jl)
+#   p7       near-boundary rows for OPT > 3 (own off-centred recipe family vs
+#            OPT3 fallback vs moving ν): row residuals, shell eigenfrequencies,
+#            δ/δ' sources, core-mantle P-SV  (stages/p7_nearboundary.jl)
 #
 # From a terminal, in the repository root:
 #   julia --project=. dev/spherical1Delastic/run.jl step3b
@@ -25,7 +28,7 @@
 #   spherical("step3a2", "--redo=eigen")          # afterwards
 # Figures: dev/spherical1Delastic/outputs/<step>/
 # --redo= stage names: cartesian, convergence, exactness, zones, eigen, systems, spectra,
-#          gamma, shell, p6systems, p6spectra, all
+#          gamma, shell, p6systems, p6spectra, rows, sources, coreMantle, all
 # Code: lib/*.jl (helpers/sphericalTI_*.jl only forward there).
 
 include(joinpath(@__DIR__, "..", "common", "devBootstrap.jl"))
@@ -43,9 +46,10 @@ SPH_STEP_FILES = Dict(
     "p2"      => "p2_checks.jl",
     "p5"      => "p5_seismograms.jl",
     "p6"      => "p6_sources.jl",
+    "p7"      => "p7_nearboundary.jl",
 )
 DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS;
-    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b", "p1", "p2", "p5", "p6"], defaultStep="p6")
+    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b", "p1", "p2", "p5", "p6", "p7"], defaultStep="p7")
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("spherical1Delastic dev run: ", DEV)
 
