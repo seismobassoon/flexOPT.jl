@@ -390,7 +390,9 @@ Surface (u_r, u_θ, u_φ) on the meridian φ = φr for every source in
 `sources` (Dict name => pointSource(...)), source exactly on the polar axis
 (no 1e-5 clamp: the analytic pole coefficients are used, |m| ≤ 2).  One LU per
 (ω, l) serves all sources and all radial functionals (columns U·X, U·X',
-V·X, V·X' for P-SV; W·X, W·X' for SH).  `anelastic = (psv=(q1=..,q2=..), sh=...)`
+V·X, V·X' for P-SV; W·X, W·X' for SH), frequencies in parallel over Julia
+threads (`julia -t auto`).  `parts` selects :psv and/or :sh; `split = true`
+also returns "name|psv" and "name|sh".  `anelastic = (psv=(q1=..,q2=..), sh=...)`
 switches on the complex moduli.  `omegaiTlen = 1e-4`: ω_I·tlen = ln 10⁴
 (classic DSM uses 1e-2; that leaves up to ~10 % of wrapped antipodal surface
 waves in the first 2000 s, see p6).
@@ -400,7 +402,7 @@ function pointSourceSynthetics(psv::ElasticGlobalSystem, sh, R; rs_km, sources,
                                receiversθdeg=10:10:170, φr=π / 2,
                                tlen=3276.8, fmax=0.05, omegaiTlen=1e-4,
                                lmaxOf=ω -> ceil(Int, ω * R / 3.0) + 30, lcap=1500,
-                               verbose=true)
+                               verbose=true, parts=(:psv, :sh), split=false)
     ωI = -log(omegaiTlen) / tlen
     kmax = floor(Int, fmax * tlen)
     ωs = [2π * k / tlen for k in 0:kmax]
@@ -440,38 +442,58 @@ function pointSourceSynthetics(psv::ElasticGlobalSystem, sh, R; rs_km, sources,
     Ws = isnothing(sh) ? 0 : surfaceDofs(sh)[1]
     qP = isnothing(anelastic) ? nothing : anelastic.psv
     qS = (isnothing(anelastic) || isnothing(sh)) ? nothing : anelastic.sh
-    out = Dict(nm => (ur=zeros(ComplexF64, length(ωs), nr), uθ=zeros(ComplexF64, length(ωs), nr),
-                      uφ=zeros(ComplexF64, length(ωs), nr)) for nm in names)
-    t0 = time()
-    for (iω, ω) in enumerate(ωs)
+    doP = :psv in parts; doS = (:sh in parts) && !isnothing(sh)
+    nω = length(ωs)
+    mk() = Dict(nm => (ur=zeros(ComplexF64, nω, nr), uθ=zeros(ComplexF64, nω, nr),
+                       uφ=zeros(ComplexF64, nω, nr)) for nm in names)
+    outP = mk(); outS = mk()
+    # frequencies are independent: one thread per ω (start Julia with -t auto);
+    # each thread writes only its own row iω.  BLAS threads would oversubscribe.
+    Threads.nthreads() > 1 && LinearAlgebra.BLAS.set_num_threads(1)
+    ndone = Threads.Atomic{Int}(0); t0 = time()
+    Threads.@threads :dynamic for iω in 1:nω
+        ω = ωs[iω]
         Ωc = (ω - im * ωI) * R
         lmax = min(lmaxAll, lmaxOf(ω))
         for l in 0:lmax
-            G = lu(anelasticOperator(psv, qP, Ωc, ω, l)) \ LP
-            gU = G[Us, :]; gV = G[Vs, :]
-            gW = zeros(ComplexF64, 2)
-            if !isnothing(sh) && l >= 1
-                gW = (lu(anelasticOperator(sh, qS, Ωc, ω, l)) \ LS)[Ws, :]
-            end
-            for nm in names
-                d = S[nm]; o = out[nm]
-                for j in 1:4
-                    @views o.ur[iω, :] .+= gU[j] .* d.Y[j][l+1, :]
-                    @views o.uθ[iω, :] .+= gV[j] .* d.Bθ[j][l+1, :]
-                    @views o.uφ[iω, :] .+= gV[j] .* d.Bφ[j][l+1, :]
+            if doP
+                G = lu(anelasticOperator(psv, qP, Ωc, ω, l)) \ LP
+                gU = G[Us, :]; gV = G[Vs, :]
+                for nm in names
+                    d = S[nm]; o = outP[nm]
+                    for j in 1:4
+                        @views o.ur[iω, :] .+= gU[j] .* d.Y[j][l+1, :]
+                        @views o.uθ[iω, :] .+= gV[j] .* d.Bθ[j][l+1, :]
+                        @views o.uφ[iω, :] .+= gV[j] .* d.Bφ[j][l+1, :]
+                    end
                 end
-                for j in 1:2
-                    @views o.uθ[iω, :] .+= gW[j] .* d.Cθ[j][l+1, :]
-                    @views o.uφ[iω, :] .+= gW[j] .* d.Cφ[j][l+1, :]
+            end
+            if doS && l >= 1
+                gW = (lu(anelasticOperator(sh, qS, Ωc, ω, l)) \ LS)[Ws, :]
+                for nm in names
+                    d = S[nm]; o = outS[nm]
+                    for j in 1:2
+                        @views o.uθ[iω, :] .+= gW[j] .* d.Cθ[j][l+1, :]
+                        @views o.uφ[iω, :] .+= gW[j] .* d.Cφ[j][l+1, :]
+                    end
                 end
             end
         end
-        verbose && (iω % 20 == 0 || iω == length(ωs)) &&
-            @printf("  %s: f = %.4f Hz (%d/%d), lmax = %d, %.1f s\n", psv.label,
-                    ω / 2π, iω, length(ωs), lmax, time() - t0)
+        k = Threads.atomic_add!(ndone, 1) + 1
+        verbose && (k % 20 == 0 || k == nω) &&
+            @printf("  %s: %d/%d frequencies, %.1f s (%d threads)\n", psv.label, k, nω,
+                    time() - t0, Threads.nthreads())
     end
-    return Dict(nm => (ω=ωs, ωI=ωI, tlen=tlen, θdeg=collect(receiversθdeg), φr=φr,
-                       ur=out[nm].ur, uθ=out[nm].uθ, uφ=out[nm].uφ) for nm in names)
+    spec(o) = (ω=ωs, ωI=ωI, tlen=tlen, θdeg=collect(receiversθdeg), φr=φr, ur=o.ur, uθ=o.uθ, uφ=o.uφ)
+    res = Dict{String,Any}()
+    for nm in names
+        res[nm] = spec((ur=outP[nm].ur .+ outS[nm].ur, uθ=outP[nm].uθ .+ outS[nm].uθ,
+                        uφ=outP[nm].uφ .+ outS[nm].uφ))
+        if split
+            res[nm * "|psv"] = spec(outP[nm]); res[nm * "|sh"] = spec(outS[nm])
+        end
+    end
+    return res
 end
 
 # ---------------------------------------------------------------------------

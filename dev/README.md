@@ -10,6 +10,7 @@ notebooks are not touched.
 |---|---|---|
 | `kirishima_oct2026/` | `notebooks/Elastic2DtopoBenchmark_oct2026.ipynb` | `step1`, `step2` (cases `homog`, `heter`) |
 | `spherical1Delastic/` | `notebooks/SphericalTI_SH_oct2026.ipynb`, `notebooks/SphericalTI_PSV_oct2026.ipynb` | SH: `step1`, `step2`, `step3a`, `step3a1`, `step3a2`, `step3b`; P-SV: `p1`, `p2`, `p5`; sources + classic DSM benchmark: `p6` |
+| `spherical1DelasticKernel/` | (none; logic of Zhao & Chevrot 2011 and old DSM-Kernel SGTsh/SGTpsv, on `spherical1Delastic/lib`) | `k1` checks, `k2` PREM SGT disks, `k3` Born vs brute force |
 
 `spherical1Delastic/lib/` is the single source of the 1-D spherical elastic code (SH, P-SV, fluid in Q = P/ω, recipes, conventional DSM, global systems, synthetics); `helpers/sphericalTI_*.jl` only forward to it.
 

@@ -27,6 +27,7 @@ CODE_VERSION = Dict(
     "p7_eigen"          => "v2-2026-10-28",  # shellEigenNearRows
     "p7_sources"        => "v2-2026-10-28",  # shellSourceConvergence per nearRows variant
     "p7_coreMantle"     => "v2-2026-10-28",  # coreMantleEigenBenchmark per nearRows variant
+    "p8_spectra"        => "v1-2026-10-28",  # pointSourceSynthetics (split, threaded), one file per (scheme, h)
 )
 # myProduceOrLoad keeps these under DrWatson's datadir() = <repo>/data (git-ignored)
 SPH_CACHE_DIR = joinpath("dev", "spherical1Delastic")

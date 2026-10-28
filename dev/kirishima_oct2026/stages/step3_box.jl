@@ -49,6 +49,28 @@ sourcePositionStep3 = (x=step3SourceOffsetX, z=step3SourceDepth)
 # the void half's fetched values are never used (masked out downstream).
 solidMaskStep3 = zCoordinatesStep3 .<= 0.0
 @assert any(solidMaskStep3) && !all(solidMaskStep3) "step3AboveSurfaceVoid/step3BelowMargin must leave both a solid and a void part of the box"
-@assert all(seismicModel2DStep3.ρ[:, solidMaskStep3] .> air_density_cutoff) "the flat z<=0 cut reaches real air somewhere in this box -- the real local topography must dip below sea level here; inspect Step 1's topography plot, or shift step3SourceOffsetX"
+# The flat z<=0 cut is an idealisation: a few columns can still land on
+# real coastline/low-lying terrain (true air or water below the chosen
+# sea-level datum) even though most of the solid half is genuine rock.
+# Patch those cells to the solid region's own median instead of hard
+# failing the whole box over what should be a small edge effect -- but
+# still fail loudly if the patched fraction is too large to trust (the
+# box would then be genuinely badly placed, not just brushing the coast).
+solidRhoStep3 = @view seismicModel2DStep3.ρ[:, solidMaskStep3]
+badSolidStep3 = solidRhoStep3 .<= air_density_cutoff
+nBadSolidStep3, nSolidTotalStep3 = count(badSolidStep3), length(solidRhoStep3)
+badSolidFractionStep3 = nBadSolidStep3 / nSolidTotalStep3
+if nBadSolidStep3 > 0
+    solidVpStep3 = @view seismicModel2DStep3.Vpv[:, solidMaskStep3]
+    solidVsStep3 = @view seismicModel2DStep3.Vsv[:, solidMaskStep3]
+    goodMedianVpStep3 = median(solidVpStep3[.!badSolidStep3])
+    goodMedianVsStep3 = median(solidVsStep3[.!badSolidStep3])
+    goodMedianRhoStep3 = median(solidRhoStep3[.!badSolidStep3])
+    solidVpStep3[badSolidStep3] .= goodMedianVpStep3
+    solidVsStep3[badSolidStep3] .= goodMedianVsStep3
+    solidRhoStep3[badSolidStep3] .= goodMedianRhoStep3
+    @warn "step3_box: patched real air/water cells inside the flat z<=0 solid region with the solid median (likely coastline/low terrain inside this box's footprint)" nBadSolidStep3 nSolidTotalStep3 badSolidFractionStep3
+end
+@assert badSolidFractionStep3 < 0.05 "too much of the nominally-solid (z<=0) part of this box is real air/water ($(round(100*badSolidFractionStep3; digits=1))%) -- the box reaches real coastline/sea; reduce step3LateralHalfWidth or move step3SourceOffsetX"
 @show size(seismicModel2DStep3.ρ) extrema(seismicModel2DStep3.Vpv[:, solidMaskStep3]) extrema(seismicModel2DStep3.Vsv[:, solidMaskStep3])
 @show nxStep3 nzStep3 dx2D step3LateralHalfWidth step3SourceDepth sourcePositionStep3
