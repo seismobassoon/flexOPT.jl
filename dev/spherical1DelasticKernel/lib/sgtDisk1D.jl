@@ -188,6 +188,14 @@ grid, `diskRadii`; a plain vector of radii in km is also accepted, side
 all source components and all radii.  `anelastic = (psv=(q1,q2), sh=(q1,q2))`
 switches on the complex moduli of classic DSM.
 
+`adjoint` (default: true for :force): solve with Kᵀ instead of K.  The
+receiver-side Green's function is the solution of the ADJOINT discrete
+problem; for a symmetric operator (DSMconv) nothing changes, for a
+non-symmetric one (OPT3, OPT5: Petrov–Galerkin rows, clipped / fallback
+boundary rows) it makes reciprocity exact (u_n(R) = w_Rᵀ K⁻¹ w_S both ways)
+and the kernels the exact discrete gradient δu = (K⁻ᵀ w_R)ᵀ δK (K⁻¹ w_S).
+(PREM, OPT3, h = 10 km: reciprocity 3.6e-2 with K, vs 4e-12 for DSMconv.)
+
 Fields: strain[iω, ipair, ir, iθ] for `pairs.strain`, disp[...] for
 `pairs.disp`, lmax[iω], tail[iω, ir] = max over the last 10 degrees and
 over θ of |strain contribution of degree l| / max_θ |strain| at that radius
@@ -196,7 +204,8 @@ singular at θ = 0 -- exclude the source neighbourhood there).
 """
 function computeSGTDisk(psv, sh, model; family::Symbol, rs_km, radii=diskRadii(psv), θdeg, tlen, fmax,
                         omegaiTlen=1e-4, fmin=0.0, ωlist=nothing, p::Integer=2,
-                        anelastic=nothing, lmaxOf=nothing, lcap=2000, verbose=true)
+                        anelastic=nothing, lmaxOf=nothing, lcap=2000, adjoint=(family === :force),
+                        verbose=true)
     if radii isa AbstractVector
         r_km = collect(Float64, radii); sides = fill(:upper, length(r_km))
     else
@@ -266,8 +275,14 @@ function computeSGTDisk(psv, sh, model; family::Symbol, rs_km, radii=diskRadii(p
         lastIncr = zeros(nr)                      # max over the last 10 degrees of max_θ |Δε|
         Dacc = zeros(ComplexF64, length(pairs.disp), nr, nθ)
         for l in 0:lmax
-            Gp = lu(anelasticOperator(psv, qP, Ωc, ω, l)) \ LP
-            Gs = (hasSH && l >= 1) ? (lu(anelasticOperator(sh, qS, Ωc, ω, l)) \ LS) : nothing
+            Kp = anelasticOperator(psv, qP, Ωc, ω, l)
+            Gp = lu(adjoint ? sparse(transpose(Kp)) : Kp) \ LP
+            Gs = if hasSH && l >= 1
+                Ks = anelasticOperator(sh, qS, Ωc, ω, l)
+                lu(adjoint ? sparse(transpose(Ks)) : Ks) \ LS
+            else
+                nothing
+            end
             fill!(Lacc, 0)
             # radial factors per load column, then per source:
             #   strain:  g = (∂rU, U/r, V/r, W/r, ∂rV, ∂rW),  displacement: (U, V, W)
@@ -320,7 +335,7 @@ function computeSGTDisk(psv, sh, model; family::Symbol, rs_km, radii=diskRadii(p
     return (family=family, rs_km=Float64(rs_km), R=R, r_km=r_km, side=sides,
             seg=[ev.zone for ev in evP], θdeg=θdeg, ω=ωs, ωI=ωI,
             tlen=Float64(tlen), pairs=pairs, strain=strain, disp=disp, lmax=lmaxs, tail=tails,
-            p=p, anelastic=!isnothing(anelastic), label=psv.label)
+            p=p, anelastic=!isnothing(anelastic), adjoint=adjoint, label=psv.label)
 end
 
 # ---------------------------------------------------------------------------

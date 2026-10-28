@@ -88,29 +88,34 @@ for re in ("1e-2", "1e-3", "1e-4", "1e-5"), part in ("psv", "sh")
 end
 haskey(p8Classic, ("1e-5", "psv")) || error("no classic reference in $(p8ClassicDir)")
 
-println("\n---- relative misfit vs classic DSM (re = 1e-5, zero frequency included)")
+# reference: P-SV -> tipsv re = 1e-5 (converges cleanly, ~h², good to ~1e-5);
+#            SH   -> our OPT5 at h = 2.5 km: tish is not self-consistent below
+#            re = 1e-3 (successive refinements differ more and more; a third tish
+#            problem, not traced yet), so its points are plotted against OPT5.
+p8RefName = Dict("psv" => "classic DSM (tipsv re=1e-5)", "sh" => "OPT5 h=2.5 km")
+println("\n---- relative misfit (reference: P-SV ", p8RefName["psv"], ", SH ", p8RefName["sh"], ")")
 p8Rows = NamedTuple[]
 for part in ("psv", "sh")
-    ref = p8Classic[("1e-5", part)]
     own = p8Ours[("OPT5", 2.5)][part]
+    ref = part == "psv" ? p8Classic[("1e-5", part)] : own
     println(uppercase(part), ":")
     for (sc, h) in p8Runs
         A = p8Ours[(sc, h)][part]
         e = p8Misfit(A, ref); e2 = p8Misfit(A, own)
         push!(p8Rows, (part=part, scheme=sc, h=h, err=e, errOwn=e2))
-        @printf("  %-8s h = %5.1f km   vs classic(1e-5) %.3e   vs OPT5(2.5 km) %.3e\n", sc, h, e, e2)
+        @printf("  %-8s h = %5.1f km   vs reference %.3e   vs OPT5(2.5 km) %.3e\n", sc, h, e, e2)
     end
-    for re in ("1e-2", "1e-3", "1e-4")
+    for re in (part == "psv" ? ("1e-2", "1e-3", "1e-4") : ("1e-2", "1e-3", "1e-4", "1e-5"))
         haskey(p8Classic, (re, part)) || continue
         e = p8Misfit(p8Classic[(re, part)], ref); e2 = p8Misfit(p8Classic[(re, part)], own)
         hh = get(p8ClassicH, (re, part), NaN)
         push!(p8Rows, (part=part, scheme="classic DSM", h=hh, err=e, errOwn=e2))
-        @printf("  classic re=%s (mean h %.2f km)   vs classic(1e-5) %.3e   vs OPT5(2.5 km) %.3e\n", re, hh, e, e2)
+        @printf("  classic re=%s (mean h %.2f km)   vs reference %.3e   vs OPT5(2.5 km) %.3e\n", re, hh, e, e2)
     end
-    @printf("  classic(1e-5) vs OPT5(2.5 km): %.3e\n", p8Misfit(ref, own))
+    @printf("  classic(re=1e-5) vs OPT5(2.5 km): %.3e\n", p8Misfit(p8Classic[("1e-5", part)], own))
 end
 for part in ("psv", "sh"), sc in ("DSMconv", "OPT3", "OPT5")
-    rr = sort(filter(r -> r.part == part && r.scheme == sc, p8Rows); by=r -> -r.h)
+    rr = sort(filter(r -> r.part == part && r.scheme == sc && r.err > 0, p8Rows); by=r -> -r.h)
     length(rr) < 2 && continue
     @printf("%-4s %-8s orders vs classic: %s\n", part, sc,
             join((@sprintf("%5.2f", log2(rr[i].err / rr[i+1].err) / log2(rr[i].h / rr[i+1].h)) for i in 1:length(rr)-1), " "))
@@ -121,16 +126,16 @@ let fig = Figure(size=(1400, 600))
     for (ip, part) in enumerate(("psv", "sh"))
         ax = Axis(fig[1, ip]; xscale=log10, yscale=log10, xlabel="radial spacing h (km)",
                   ylabel="relative misfit (Z, R, T, all f and stations)",
-                  title=(part == "psv" ? "P-SV" : "SH") * ": PREM, moment tensor at 500 km, vs classic DSM re = 1e-5")
+                  title=(part == "psv" ? "P-SV" : "SH") * ": PREM, MT at 500 km, vs " * p8RefName[part])
         for sc in ("DSMconv", "OPT3", "OPT5", "classic DSM")
-            rr = sort(filter(r -> r.part == part && r.scheme == sc && isfinite(r.h), p8Rows); by=r -> r.h)
+            rr = sort(filter(r -> r.part == part && r.scheme == sc && isfinite(r.h) && r.err > 0, p8Rows); by=r -> r.h)
             isempty(rr) && continue
             scatterlines!(ax, [r.h for r in rr], [r.err for r in rr]; color=cols[sc],
                           marker=sc == "classic DSM" ? :rect : :circle, label=sc)
         end
         hs = [2.5, 20.0]
         for (p, ls) in ((2, :dash), (4, :dot))
-            y0 = minimum(r.err for r in p8Rows if r.part == part)
+            y0 = minimum(r.err for r in p8Rows if r.part == part && r.err > 0)
             lines!(ax, hs, y0 .* (hs ./ hs[1]) .^ p; color=:gray, linestyle=ls, label="h^$(p)")
         end
         axislegend(ax; position=:rb)

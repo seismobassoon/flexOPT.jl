@@ -55,13 +55,19 @@ receiverX = quickRun ?
     (sourcePosition.x .+ [-20e3, -10e3, 0.0, 10e3, 20e3])
 receiverGridX = quickRun ? collect((sourcePosition.x-20e3):5e3:(sourcePosition.x)) :
     collect((sourcePosition.x-30e3):10e3:(sourcePosition.x+30e3))
+# Clamped at -dx (not 0.0): a receiver belongs to the solid interior, not
+# sitting exactly on the free-surface boundary node itself.
 receiverGridZ = quickRun ? collect((sourcePosition.z-15e3):5e3:(sourcePosition.z)) :
-    collect((sourcePosition.z-30e3):10e3:(sourcePosition.z+10e3))
+    collect((sourcePosition.z-30e3):10e3:min(sourcePosition.z+10e3, -dx))
 receiverGrid = [(x=xr, z=zr) for zr in receiverGridZ for xr in receiverGridX
     if hypot(xr - sourcePosition.x, zr - sourcePosition.z) >= 5e3]
+# Left/right/bottom margins only -- like distanceToNearestPhysicalEdge
+# above, the top is the physical free surface (Cerjan's upper-z damping
+# is explicitly 0 cells there, see `cerjan` above), not an artificial
+# absorbing edge that a receiver needs 20-30 km of clearance from.
 receiverBoundaryMargins = [minimum((
     station.x - first(x), last(x) - station.x,
-    station.z - first(z), last(z) - station.z,
+    station.z - first(z),
 )) for station in receiverGrid]
 @assert minimum(receiverBoundaryMargins) >= (quickRun ? 20e3 : 30e3)
 duration = quickRun ? 6.4 : 12.0

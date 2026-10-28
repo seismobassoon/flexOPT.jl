@@ -47,8 +47,8 @@ for scheme in k3Schemes, (name, bm, rq, wq, δ) in k3Cases
                                    scheme=scheme, configs=shConfigs, recipes=kerRecipes)),
             S=k3S, M=k3M, Rcv=k3Rc, ε=1e-3, r_nodes=rq, r_weights=wq, δ=δ,
             tlen=k3tlen, fmax=k3fmax, omegaiTlen=k3Oi, nθ=128, nφ=256, iωs=[2, 4, 7],
-            interp=k3Interp, p=sourceOrderOf(scheme))
-    end
+            interp=k3Interp, p=sourceOrderOf(scheme)) |> rows -> Dict("rows" => rows)   # DrWatson saves Dicts only
+    end["rows"]
     for r in rows
         @printf("  f=%.4f %s  rel.diff %.2e  (|δu|/|u| %.1e)\n", r.f, r.comp, r.rel, r.size)
     end

@@ -2,8 +2,8 @@
 # (bump when the code behind it changes: lib/*.jl here or dev/spherical1Delastic/lib).
 CODE_VERSION_K = Dict(
     "k_systems" => "v1-2026-10-28",   # elasticGlobalSystem PREM / layered (dev/spherical1Delastic/lib)
-    "k1_disks"  => "v1-2026-10-28",   # computeSGTDisk for the checks
-    "k2_disks"  => "v1-2026-10-28",   # computeSGTDisk PREM, grid radii
-    "k3_born"   => "v1-2026-10-28",   # bornBruteForceCheck
+    "k1_disks"  => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # computeSGTDisk for the checks
+    "k2_disks"  => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # computeSGTDisk PREM, grid radii
+    "k3_born"   => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # bornBruteForceCheck
 )
 KER_CACHE_DIR = joinpath("dev", "spherical1DelasticKernel")

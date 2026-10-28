@@ -23,11 +23,12 @@ k2Disks = Dict{Symbol,Any}()
 for (family, rs) in ((:moment, Rp - k2Depth), (:force, Rp))
     params = k2Params(family, rs)
     devRedo!("disks", params, KER_CACHE_DIR, "k2_disks")
+    # DrWatson (tagsave) only saves Dicts: wrap the disk NamedTuple
     k2Disks[family] = myProduceOrLoad(params, KER_CACHE_DIR, "k2_disks") do cfg
-        computeSGTDisk(psv, sh, prem; family=family, rs_km=rs, radii=diskRadii(psv; stride=k2Stride),
+        Dict("disk" => computeSGTDisk(psv, sh, prem; family=family, rs_km=rs, radii=diskRadii(psv; stride=k2Stride),
                        θdeg=0:k2θstep:180, tlen=k2tlen, fmax=k2fmax, omegaiTlen=k2Oi,
-                       p=sourceOrderOf(k2Scheme))
-    end
+                       p=sourceOrderOf(k2Scheme)))
+    end["disk"]
     d = k2Disks[family]
     nb = 16 * (length(d.strain) + length(d.disp))
     @printf("%s disk (rs = %.1f km): %d ω × %d+%d pairs × %d r × %d θ = %.1f MB; lmax %d..%d\n",
