@@ -21,6 +21,8 @@
 #   p8       convergence curves P-SV and SH on PREM vs very fine classic DSM
 #            (zero frequency included)  (stages/p8_convergence.jl)
 #            -> run with threads: julia --project=. -t auto dev/spherical1Delastic/run.jl p8
+#   p8t      CPU time of our schemes, not cached (run with -t 1 for the one-core
+#            comparison with tmp/classic_timing)  (stages/p8t_timing.jl)
 #
 # From a terminal, in the repository root:
 #   julia --project=. dev/spherical1Delastic/run.jl step3b
@@ -51,9 +53,10 @@ SPH_STEP_FILES = Dict(
     "p6"      => "p6_sources.jl",
     "p7"      => "p7_nearboundary.jl",
     "p8"      => "p8_convergence.jl",
+    "p8t"     => "p8t_timing.jl",
 )
 DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS;
-    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b", "p1", "p2", "p5", "p6", "p7", "p8"], defaultStep="p8")
+    steps=["step1", "step2", "step3a", "step3a1", "step3a2", "step3b", "p1", "p2", "p5", "p6", "p7", "p8", "p8t"], defaultStep="p8")
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("spherical1Delastic dev run: ", DEV)
 

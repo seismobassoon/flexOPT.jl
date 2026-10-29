@@ -114,3 +114,91 @@ function shellBornIntegral(diskS, diskR, iω, S::PointGeo, M, Rcv::PointGeo, n;
     end
     return total
 end
+
+# ---------------------------------------------------------------------------
+# cross-correlation traveltime (ZC eqs 8-12) in the frequency domain
+# ---------------------------------------------------------------------------
+#   δT = ∫ J(t) δu(t) dt,  J = -∂t u W / ∫ (∂t u)² W dt   (u: reference trace, W: window)
+# With the same time synthesis as shTimeSeries / diskSnapshot,
+#   δu(t) = (Δω/π) Re[ ½ w_0 δu_0 + Σ_k w_k δu_k e^{iω_k t} ] e^{ω_I t},
+# δT = Re Σ_k c_k δu_k  with  c_k = (Δω/π) w'_k ∫ J(t) e^{iω_k t} e^{ω_I t} dt (w'_0 = w_0/2).
+# Hence the traveltime kernel K_T(Q) = Σ_k Re(c_k K_k(Q)) for any waveform kernel K_k.
+
+"""
+    traveltimeWeights(uω, ωs, ωI, tlen; window, taper=0.2, dt=0.5, ramp=20.0)
+
+Weights c_k (see above) for the reference spectrum `uω` (receiver component,
+frequencies ωs = 2πk/tlen from k = 0) and the time window (t1, t2) (s), with
+cosine ramps of `ramp` s.  Returns (c, t, u, J, W).
+"""
+function traveltimeWeights(uω, ωs, ωI, tlen; window, taper=0.2, dt=0.5, ramp=20.0)
+    abs(ωs[1]) < 1e-12 || error("frequencies must start at ω = 0")
+    nω = length(ωs); Δω = 2π / tlen
+    w = _taperWeights(nω, taper); w′ = copy(w); w′[1] /= 2
+    t = collect(0:dt:tlen-dt)
+    A = [sum(w′[k] * uω[k] * cis(ωs[k] * tt) for k in 1:nω) for tt in t]
+    dA = [sum(w′[k] * uω[k] * (im * ωs[k]) * cis(ωs[k] * tt) for k in 1:nω) for tt in t]
+    e = exp.(ωI .* t)
+    u = (Δω / π) .* real.(A) .* e
+    du = (Δω / π) .* real.(dA .+ ωI .* A) .* e
+    t1, t2 = window
+    W = [tt < t1 - ramp || tt > t2 + ramp ? 0.0 :
+         tt < t1 ? 0.5 * (1 - cos(π * (tt - t1 + ramp) / ramp)) :
+         tt > t2 ? 0.5 * (1 + cos(π * (tt - t2) / ramp)) : 1.0 for tt in t]
+    J = -du .* W ./ (sum(du .^ 2 .* W) * dt)
+    c = [(Δω / π) * w′[k] * sum(J .* cis.(ωs[k] .* t) .* e) * dt for k in 1:nω]
+    return (c=c, t=t, u=u, J=J, W=W)
+end
+
+"Cross-correlation delay (s) of trace b relative to a (same t grid) inside the window W (parabolic refinement)."
+function ccDelay(t, a, b, W; maxlag=30.0)
+    dt = t[2] - t[1]; nl = round(Int, maxlag / dt)
+    aw = a .* W
+    cc = [sum(aw[max(1, 1 - l):min(end, end - l)] .* b[max(1, 1 + l):min(end, end + l)]) for l in -nl:nl]
+    i = argmax(cc)
+    (i == 1 || i == length(cc)) && return (i - nl - 1) * dt
+    y1, y2, y3 = cc[i-1], cc[i], cc[i+1]
+    return ((i - nl - 1) + 0.5 * (y1 - y3) / (y1 - 2y2 + y3)) * dt
+end
+
+"""
+    traveltimeKernelAt(dS, dR, S, M, Rcv, n, Q, c; model, side=:upper)
+
+Cross-correlation traveltime kernels at Q (s per unit relative perturbation
+per km³) for δln β (L, N; F = η(A - 2L) follows), δln α (A, C; F follows)
+and δln ρ at fixed velocities, from the weights c = traveltimeWeights(...).c.
+`model` gives the TI parameters (elasticMaterials).  Returns a NamedTuple.
+"""
+function traveltimeKernelAt(dS, dR, S::PointGeo, M, Rcv::PointGeo, n, Q::PointGeo, c; model, side::Symbol=:upper)
+    ES, US = sgtAtAllω(dS, S, M, Q; side=side)
+    ER, UR = sgtAtAllω(dR, Rcv, n, Q; side=side)
+    R = dS.R
+    iz = _zoneOfRadius(model, Q.r; side=side)
+    m = elasticMaterials(model, iz, Q.r / R)
+    η = abs(m.A - 2m.L) > 0 ? m.F / (m.A - 2m.L) : 1.0
+    Kβ = 0.0; Kα = 0.0; Kρ = 0.0
+    for k in eachindex(c)
+        ωc = dS.ω[k] - im * dS.ωI
+        K = kernelDensities(view(ER, k, :, :), view(ES, k, :, :), view(UR, k, :), view(US, k, :), ωc)
+        kβ = 2m.L * K.L + 2m.N * K.N - 4η * m.L * K.F
+        kα = 2m.A * K.A + 2m.C * K.C + 2η * m.A * K.F
+        kρ = m.ρ * K.ρ + m.A * K.A + m.C * K.C + m.F * K.F + m.L * K.L + m.N * K.N
+        Kβ += real(c[k] * kβ); Kα += real(c[k] * kα); Kρ += real(c[k] * kρ)
+    end
+    return (β=Kβ, α=Kα, ρ=Kρ)
+end
+
+"Planet zone index containing r (km); on a boundary `side` picks the upper or lower zone."
+function _zoneOfRadius(model, r; side::Symbol=:upper)
+    c = [i for i in 1:model.nzone if model.bottomRadius[i] - 1e-9 <= r <= model.topRadius[i] + 1e-9]
+    isempty(c) && error("radius $r outside the model")
+    return side === :upper ? last(c) : first(c)
+end
+
+"q-quantile of |v| (finite values), for symmetric colour ranges."
+function quantile_abs(v, q)
+    a = sort(filter(isfinite, abs.(vec(v))))
+    isempty(a) && return 1.0
+    x = a[clamp(round(Int, q * length(a)), 1, length(a))]
+    return x > 0 ? x : 1.0
+end

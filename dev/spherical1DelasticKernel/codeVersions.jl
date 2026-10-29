@@ -4,6 +4,7 @@ CODE_VERSION_K = Dict(
     "k_systems" => "v1-2026-10-28",   # elasticGlobalSystem PREM / layered (dev/spherical1Delastic/lib)
     "k1_disks"  => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # computeSGTDisk for the checks
     "k2_disks"  => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # computeSGTDisk PREM, grid radii
+    "k4_disks"  => "v1-2026-10-28",   # k4: PREM disks for the traveltime kernels
     "k3_born"   => "v2-2026-10-28",   # v2: :force disk with Kᵀ (adjoint);   # bornBruteForceCheck
 )
 KER_CACHE_DIR = joinpath("dev", "spherical1DelasticKernel")

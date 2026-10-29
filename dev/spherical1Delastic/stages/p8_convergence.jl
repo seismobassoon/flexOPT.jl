@@ -88,6 +88,31 @@ for re in ("1e-2", "1e-3", "1e-4", "1e-5"), part in ("psv", "sh")
 end
 haskey(p8Classic, ("1e-5", "psv")) || error("no classic reference in $(p8ClassicDir)")
 
+# dsmti-3.1.8 (Takeuchi), zero frequency added: 3 components together (P-SV + SH);
+# file per station: header, then "i Re/Im(Z) Re/Im(R) Re/Im(T)".  ngrid_r = total
+# radial points (coarsened over 4 frequency bands) -> mean spacing R/ngrid_r.
+p8DsmtiDir = joinpath(flexopt_root, "tmp", "classicDSM_out", "dsmti500")
+function p8ReadDsmti(dir, θdeg)
+    rows = [readlines(joinpath(dir, @sprintf("S%03d.spc", round(Int, θ)))) for θ in θdeg]
+    hdr = split(rows[1][1]); tlen = parse(Float64, hdr[1]); ωI = parse(Float64, hdr[3])
+    nω = length(rows[1]) - 1
+    U = [zeros(ComplexF64, nω, length(θdeg)) for _ in 1:3]
+    for (ir, L) in enumerate(rows), k in 1:nω
+        v = parse.(Float64, split(L[k+1])[2:7])
+        for c in 1:3
+            U[c][k, ir] = complex(v[2c-1], v[2c])
+        end
+    end
+    ωs = 2π .* (0:nω-1) ./ tlen
+    return (ω=collect(ωs), ωI=ωI, tlen=tlen, θdeg=collect(θdeg), ur=U[1], uθ=U[2], uφ=U[3])
+end
+p8Dsmti = Dict{Int,Any}()
+for ng in (2000, 4000, 8000, 16000)
+    dir = joinpath(p8DsmtiDir, "ng$(ng)")
+    isdir(dir) && (p8Dsmti[ng] = p8ReadDsmti(dir, p8θ))
+end
+p8Sub(A, B) = (ω=A.ω, ωI=A.ωI, tlen=A.tlen, θdeg=A.θdeg, ur=A.ur .- B.ur, uθ=A.uθ .- B.uθ, uφ=A.uφ .- B.uφ)
+
 # reference: P-SV -> tipsv re = 1e-5 (converges cleanly, ~h², good to ~1e-5);
 #            SH   -> our OPT5 at h = 2.5 km: tish is not self-consistent below
 #            re = 1e-3 (successive refinements differ more and more; a third tish
@@ -102,17 +127,25 @@ for part in ("psv", "sh")
     for (sc, h) in p8Runs
         A = p8Ours[(sc, h)][part]
         e = p8Misfit(A, ref); e2 = p8Misfit(A, own)
-        push!(p8Rows, (part=part, scheme=sc, h=h, err=e, errOwn=e2))
+        push!(p8Rows, (part=part, scheme=sc, h=h, err=e, errOwn=e2, setting=string(h)))
         @printf("  %-8s h = %5.1f km   vs reference %.3e   vs OPT5(2.5 km) %.3e\n", sc, h, e, e2)
     end
     for re in (part == "psv" ? ("1e-2", "1e-3", "1e-4") : ("1e-2", "1e-3", "1e-4", "1e-5"))
         haskey(p8Classic, (re, part)) || continue
         e = p8Misfit(p8Classic[(re, part)], ref); e2 = p8Misfit(p8Classic[(re, part)], own)
         hh = get(p8ClassicH, (re, part), NaN)
-        push!(p8Rows, (part=part, scheme="classic DSM", h=hh, err=e, errOwn=e2))
+        push!(p8Rows, (part=part, scheme="classic DSM", h=hh, err=e, errOwn=e2, setting="re=$(re)"))
         @printf("  classic re=%s (mean h %.2f km)   vs reference %.3e   vs OPT5(2.5 km) %.3e\n", re, hh, e, e2)
     end
     @printf("  classic(re=1e-5) vs OPT5(2.5 km): %.3e\n", p8Misfit(p8Classic[("1e-5", part)], own))
+    # dsmti: its P-SV part = total - (OPT5 2.5 km SH); its SH part = total - (tipsv 1e-5 P-SV)
+    other = part == "psv" ? p8Ours[("OPT5", 2.5)]["sh"] : p8Classic[("1e-5", "psv")]
+    for ng in sort(collect(keys(p8Dsmti)))
+        A = p8Sub(p8Dsmti[ng], other)
+        e = p8Misfit(A, ref); hh = Rprem / ng
+        push!(p8Rows, (part=part, scheme="dsmti", h=hh, err=e, errOwn=p8Misfit(A, own), setting="ngrid_r=$(ng)"))
+        @printf("  dsmti ngrid_r=%5d (mean h %.2f km)   vs reference %.3e\n", ng, hh, e)
+    end
 end
 for part in ("psv", "sh"), sc in ("DSMconv", "OPT3", "OPT5")
     rr = sort(filter(r -> r.part == part && r.scheme == sc && r.err > 0, p8Rows); by=r -> -r.h)
@@ -122,16 +155,18 @@ for part in ("psv", "sh"), sc in ("DSMconv", "OPT3", "OPT5")
 end
 
 let fig = Figure(size=(1400, 600))
-    cols = Dict("DSMconv" => :orange, "OPT3" => :dodgerblue, "OPT5" => :crimson, "classic DSM" => :black)
+    cols = Dict("DSMconv" => :orange, "OPT3" => :dodgerblue, "OPT5" => :crimson, "classic DSM" => :black,
+                "dsmti" => :gray40)
     for (ip, part) in enumerate(("psv", "sh"))
         ax = Axis(fig[1, ip]; xscale=log10, yscale=log10, xlabel="radial spacing h (km)",
                   ylabel="relative misfit (Z, R, T, all f and stations)",
                   title=(part == "psv" ? "P-SV" : "SH") * ": PREM, MT at 500 km, vs " * p8RefName[part])
-        for sc in ("DSMconv", "OPT3", "OPT5", "classic DSM")
+        for sc in ("DSMconv", "OPT3", "OPT5", "classic DSM", "dsmti")
             rr = sort(filter(r -> r.part == part && r.scheme == sc && isfinite(r.h) && r.err > 0, p8Rows); by=r -> r.h)
             isempty(rr) && continue
             scatterlines!(ax, [r.h for r in rr], [r.err for r in rr]; color=cols[sc],
-                          marker=sc == "classic DSM" ? :rect : :circle, label=sc)
+                          marker=sc == "classic DSM" ? :rect : sc == "dsmti" ? :diamond : :circle,
+                          label=sc == "classic DSM" ? (part == "psv" ? "tipsv" : "tish") : sc)
         end
         hs = [2.5, 20.0]
         for (p, ls) in ((2, :dash), (4, :dot))
@@ -155,4 +190,51 @@ let tot = p8Total
     keysPlot = ("classic DSM (re 1e-5)", "DSMconv h=10", "OPT3 h=10", "OPT5 h=10")
     plotRecordSection3C(tr, collect(p8θ); force="MT", keys=keysPlot, normalize=:trace, gain=2.0,
                         sourceLabel="moment tensor at 500 km", fileTag="MT500_h10")
+end
+
+# ---------------------------------------------------------------------------
+# accuracy vs CPU time (one core): outputs/p8/timing_ours.csv (stage p8t, -t 1) and
+# tmp/classic_timing/timing.csv (bash run_timing.sh, same Mac).  Our time = systems +
+# spectra of the 3 components (P-SV and SH together); tipsv = P-SV only, tish = SH
+# only, dsmti = both.
+let fo = joinpath(DEV_OUTPUT_DIR[], "p8", "timing_ours.csv"),
+    fc = joinpath(flexopt_root, "tmp", "classic_timing", "timing.csv")
+    if isfile(fo) && isfile(fc)
+        tOurs = Dict{Tuple{String,String},Float64}()
+        for l in readlines(fo)[2:end]
+            sc, h, th, ts, tsp = split(l, ",")
+            th == "1" && (tOurs[(sc, string(parse(Float64, h)))] = parse(Float64, ts) + parse(Float64, tsp))
+        end
+        tCl = Dict{Tuple{String,String},Float64}()
+        for l in readlines(fc)[2:end]
+            code, setting, sec = split(l, ",")
+            tCl[(code, setting)] = parse(Float64, sec)
+        end
+        timeOf(r) = r.scheme in ("DSMconv", "OPT3", "OPT5") ? get(tOurs, (r.scheme, r.setting), NaN) :
+                    r.scheme == "dsmti" ? get(tCl, ("dsmti", r.setting), NaN) :
+                    get(tCl, (r.part == "psv" ? "tipsv" : "tish", r.setting), NaN)
+        println("\n---- accuracy vs CPU time (one core)")
+        fig = Figure(size=(1400, 600))
+        cols = Dict("DSMconv" => :orange, "OPT3" => :dodgerblue, "OPT5" => :crimson, "classic DSM" => :black,
+                    "dsmti" => :gray40)
+        for (ip, part) in enumerate(("psv", "sh"))
+            ax = Axis(fig[1, ip]; xscale=log10, yscale=log10, xlabel="CPU time, one core (s)",
+                      ylabel="relative misfit", title=(part == "psv" ? "P-SV" : "SH") * ": accuracy vs cost (vs " * p8RefName[part] * ")")
+            for sc in ("DSMconv", "OPT3", "OPT5", "classic DSM", "dsmti")
+                rr = filter(r -> r.part == part && r.scheme == sc && r.err > 0 && isfinite(timeOf(r)), p8Rows)
+                isempty(rr) && continue
+                rr = sort(rr; by=timeOf)
+                for r in rr
+                    @printf("  %-4s %-12s %-14s  %8.1f s   misfit %.3e\n", part, sc, r.setting, timeOf(r), r.err)
+                end
+                scatterlines!(ax, timeOf.(rr), [r.err for r in rr]; color=cols[sc],
+                              marker=sc == "classic DSM" ? :rect : sc == "dsmti" ? :diamond : :circle,
+                              label=sc == "classic DSM" ? (part == "psv" ? "tipsv" : "tish") : sc)
+            end
+            axislegend(ax; position=:lb)
+        end
+        devSave(fig, "accuracy_vs_cputime")
+    else
+        println("\n(accuracy vs CPU time: run stage p8t with -t 1 and tmp/classic_timing/run_timing.sh first)")
+    end
 end

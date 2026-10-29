@@ -129,3 +129,57 @@ function poleFieldAt(itp, a, r, θdeg, φ; which::Symbol=:strain, side::Symbol=:
     end
     return which === :strain ? strainMatrix(out) : out
 end
+
+# ---------------------------------------------------------------------------
+# all frequencies at once (geometry and interpolation weights do not depend on ω)
+# ---------------------------------------------------------------------------
+
+"""
+    sgtAtAllω(disk, S, a, Q; side=:upper, rOrder=3, θOrder=5) -> (ε[nω, 3, 3], u[nω, 3])
+
+Strain and displacement at Q (Q's local geographic basis) for every frequency
+of the disk, source `a` at S (as `sgtAt`), local Lagrange interpolation in
+(r, θ).  Much cheaper than calling `sgtAtInterp` per frequency.
+"""
+function sgtAtAllω(disk, S::PointGeo, a, Q::PointGeo; side::Symbol=:upper, rOrder::Integer=3, θOrder::Integer=5)
+    abs(disk.rs_km - S.r) <= 1e-6 * S.r || error("disk computed for rs = $(disk.rs_km), point at $(S.r)")
+    Rs, ap = sourceToPole(disk.family, a, S)
+    θp, φp, T = frameOf(Rs, Q)
+    b = rotateSourceAboutPole(disk.family, ap, φp)
+    # radial block and weights
+    c = [k for k in eachindex(disk.r_km) if true]
+    blocks = diskBlocks(disk)
+    cand = [bk for bk in blocks if disk.r_km[first(bk)] - 1e-9 <= Q.r <= disk.r_km[last(bk)] + 1e-9]
+    isempty(cand) && error("radius $(Q.r) km is outside the disk radii")
+    bk = side === :upper ? last(cand) : first(cand)
+    rv = disk.r_km[bk]; n = length(rv)
+    q = min(rOrder, n - 1)
+    j = clamp(searchsortedlast(rv, Q.r), 1, n)
+    lo = clamp(j - (q - 1) ÷ 2, 1, n - q)
+    rows = bk[lo:lo+q]
+    wr = fornbergWeights(Q.r, disk.r_km[rows], 0)
+    θidx, wθ = diskθWeights(disk, θp; order=θOrder)
+    nω = length(disk.ω)
+    ε = zeros(ComplexF64, nω, 6); u = zeros(ComplexF64, nω, 3)
+    for (ip, (s, cc)) in enumerate(disk.pairs.strain)
+        iszero(b[s]) && continue
+        for (ia, ir) in enumerate(rows), (ib, it) in enumerate(θidx)
+            f = b[s] * wr[ia] * wθ[ib]
+            @views ε[:, cc] .+= f .* disk.strain[:, ip, ir, it]
+        end
+    end
+    for (ip, (s, cc)) in enumerate(disk.pairs.disp)
+        iszero(b[s]) && continue
+        for (ia, ir) in enumerate(rows), (ib, it) in enumerate(θidx)
+            f = b[s] * wr[ia] * wθ[ib]
+            @views u[:, cc] .+= f .* disk.disp[:, ip, ir, it]
+        end
+    end
+    E = zeros(ComplexF64, nω, 3, 3); U = zeros(ComplexF64, nω, 3)
+    for k in 1:nω
+        Ek = T * strainMatrix(view(ε, k, :)) * T'
+        E[k, :, :] .= Ek
+        U[k, :] .= T * u[k, :]
+    end
+    return E, U
+end

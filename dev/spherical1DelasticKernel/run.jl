@@ -15,6 +15,8 @@
 #        diagnostics, storage, time snapshots (cf. ZC2011 Figs 9-10)  (stages/k2_disks.jl)
 #   k3   Born kernels vs brute force (shell perturbations of a layered model:
 #        δvs mantle, δρ mantle, δvp fluid core)                 (stages/k3_born.jl)
+#   k4   first 3-D kernels: S traveltime (T component) on PREM, section + maps,
+#        weights checked against brute-force cross-correlation   (stages/k4_traveltime.jl)
 #
 # From a terminal, in the repository root:
 #   julia --project=. dev/spherical1DelasticKernel/run.jl k1
@@ -28,8 +30,8 @@ include(joinpath(@__DIR__, "..", "common", "devBootstrap.jl"))
 KER_STAGES = joinpath(@__DIR__, "stages")
 kernel1D(args...) = devRun(joinpath(@__DIR__, "run.jl"), args...)
 
-KER_STEP_FILES = Dict("k1" => "k1_checks.jl", "k2" => "k2_disks.jl", "k3" => "k3_born.jl")
-DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS; steps=["k1", "k2", "k3"], defaultStep="k1")
+KER_STEP_FILES = Dict("k1" => "k1_checks.jl", "k2" => "k2_disks.jl", "k3" => "k3_born.jl", "k4" => "k4_traveltime.jl")
+DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS; steps=["k1", "k2", "k3", "k4"], defaultStep="k1")
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("spherical1DelasticKernel dev run: ", DEV)
 
