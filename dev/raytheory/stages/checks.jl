@@ -219,3 +219,34 @@ function checkAnisotropy()
     push!(cs, RTCheck("VTI qP 3-D, receiver (9,12): tracer vs exact", s.time, vtiTime(Av, 15.0, 10.0), 1e-8))
     return cs
 end
+
+# ------------------------------------------------------------------ gridded media (Marmousi)
+"""
+Gridded-model checks: (1) tracer on a GRIDDED constant-gradient model vs the
+closed form (tests the B-spline + its gradient, edges included), (2) eikonal
+convergence on the same model, (3) on the smoothed model `gp` (Marmousi):
+earliest traced ray vs Richardson-extrapolated eikonal first arrival at
+surface receivers `Xs` (only where a ray IS the first arrival).
+"""
+function checkGrid(gp=nothing; xs=3.0, Xs=6.5:0.5:8.5, tol=3e-3)
+    cs = RTCheck[]
+    v0, g, h = 2.0, 0.5, 0.025
+    G = GridField2D([v0 + g * (j - 1) * h for i in 1:401, j in 1:201], 0.0, 0.0, h, h)
+    med, bbox = gridMedium2D(G)
+    for X in (2.0, 5.0, 9.0)
+        s = shootCartesian2D(med, "P", [0.5, 0.0], 0.5 + X; nfan=721, dT=0.01, Tmax=20.0, bbox=bbox)
+        push!(cs, RTCheck("gridded gradient, X=$X km: tracer vs closed form", s[1].time, 2 / g * asinh(g * X / (2v0)), 1e-7))
+    end
+    e = [(T = eikonalOnGrid(G, 0.5, 0.0; h=hh); T[1][argmin(abs.(T[2] .- 9.5)), 1]) for hh in (0.0125, 0.00625)]
+    push!(cs, RTCheck("gridded gradient, X=9 km: eikonal (Richardson 12.5/6.25 m)", 2 * e[2] - e[1], 2 / g * asinh(g * 9 / (2v0)), 5e-3))
+    gp === nothing && return cs
+    med, bbox = gridMedium2D(gp)
+    E = [eikonalOnGrid(gp, xs, 0.0; h=hh) for hh in (0.005, 0.0025)]
+    for X in Xs
+        s = shootCartesian2D(med, "P", [xs, 0.0], X; nfan=2881, dT=0.005, Tmax=10.0, bbox=bbox)
+        isempty(s) && continue
+        e = [T[argmin(abs.(xg .- X)), 1] for (T, xg, _) in E]
+        push!(cs, RTCheck("Marmousi, offset $(X - xs) km: first ray vs eikonal (Richardson)", s[1].time, 2 * e[2] - e[1], tol))
+    end
+    return cs
+end

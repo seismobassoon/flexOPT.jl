@@ -42,6 +42,12 @@ Media:
   `linearRegion` (v0 + g⋅x), `functionRegion` (any v(x)), or `ARegion`
   (anisotropic 6×6 A = C/ρ: `isotropicA`, `vtiA` from Thomsen parameters,
   `rotateA` for tilted TI).
+* gridded 2-D models (`lib/rayGrid.jl`): `smoothGrid` (Gaussian σ) +
+  C² cubic B-spline with linear ghost nodes at the edges (`gridEval` gives v
+  and ∇v), `gridMedium2D` → a `PiecewiseMedium` under a free surface. Ray
+  theory needs the smoothing: σ ≫ wavelength is the validity condition, and
+  caustics/multipathing depend on σ. `eikonalOnGrid` (first-order fast
+  sweeping) gives independent first-arrival times on the same model.
 
 Two independent solvers:
 * **tracer** (`traceRay`, any medium): RK4 on Hamilton's equations, boundary
@@ -60,6 +66,7 @@ julia --project=. dev/raytheory/run.jl check                 # all checks, no pl
 julia --project=. dev/raytheory/run.jl s1                    # Cartesian figures
 julia --project=. dev/raytheory/run.jl s2 PREM ak135 DWThot  # spherical: checks + figures per model
 julia --project=. dev/raytheory/run.jl s3                    # anisotropy
+julia --project=. dev/raytheory/run.jl s4 s100 s200          # acoustic Marmousi, σ = 100 / 200 m
 ```
 
 REPL: `include("dev/raytheory/run.jl")`, then `raytheory("s2", "vprem")`.
@@ -75,7 +82,7 @@ a = taupArrivals(m, "SKS", 0.0, 110.0)[1]
 r = traceRay(m, parsePhase("SKS"), sphericalStartP(m, 0.0, a.p, :S, :down)...; dT=0.5)   # full ray path
 ```
 
-## Validation (`check`, 96 checks)
+## Validation (`check`, 105 checks with the Marmousi file present)
 
 | check | reference | agreement |
 |---|---|---|
@@ -88,6 +95,19 @@ r = traceRay(m, parsePhase("SKS"), sphericalStartP(m, 0.0, a.p, :S, :down)...; d
 | homogeneous VTI qP (ε = 0.25, δ = 0.1), 2-D and 3-D | exact Thomsen phase velocity → group velocity | 1e-9 s |
 | qP: VTI half-space → isotropic layer | Fermat (minimisation over the crossing point with group velocities) | 1e-9 s |
 | P→S reflection, Christoffel vs isotropic Hamiltonian | isotropic layer 3 | 1e-9 s |
+| GRIDDED gradient model through the B-spline (2, 5, 9 km) | closed form | 1e-10 s |
+| eikonal (fast sweeping, Richardson 12.5/6.25 m) on the same | closed form | 1.5 ms (first-order scheme) |
+| Marmousi σ = 100 m, surface source, offsets 3.5–5.5 km: earliest ray | eikonal first arrival (Richardson 5/2.5 m) | 0.7–1.0 ms (eikonal's own error) |
+
+Marmousi (`s4`): the model is `notebooks/tmp/seismicModelMarmousi.jld2`
+(802 × 676, 9.2 km × 3.0 km, 450 m of water at 1.5 km/s). Where the
+eikonal is earlier than every ray it is not a ray arrival: at short offsets the
+direct wave grazing the free surface in the water, and at 6 km offset with
+σ = 100 m energy running along the bottom edge of the model (56 ms earlier;
+it disappears with σ = 200 m, where rays and eikonal agree to 0.8 ms out to
+6 km). `s4` draws ray fans with eikonal wavefronts for a surface and a buried
+source, ray wavefronts (folds = caustics/triplications) and T(x) of every
+branch at the surface.
 
 The only TauP arrivals not reproduced are 29 `PS` "arrivals" whose P leg grazes
 PREM's 600-km zone boundary: the published PREM coefficients leave a 4e-3 km/s
@@ -107,4 +127,7 @@ discontinuities here (`jumpTol` in `rayModels.jl`).
   reduction) and curved interfaces (GeoPoints manifolds with normals).
 * qS1/qS2 singularities: branches are labelled by eigenvalue order, so a ray
   may jump branch where the two shear velocities cross (needs coupling ray theory).
-* diffracted and head waves (Pdiff, Pn), grid eikonal solvers, 3-D spherical.
+* diffracted and head waves (Pdiff, Pn), 3-D spherical; a higher-order eikonal
+  (the first-order one here is only a check).
+* the eikonal is the Hamilton–Jacobi PDE of layer 1 on a grid: a natural place
+  for flexOPT's own operators (OPT stencils for |∇T|² = s²) later.

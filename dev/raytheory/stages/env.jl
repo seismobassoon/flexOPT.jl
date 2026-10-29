@@ -20,4 +20,15 @@ RT_MODELS = Dict(
 )
 rtModel(name; isotropic=:voigt) = readDSMModel(joinpath(flexopt_root, "dataInput", "model", RT_MODELS[name]); isotropic=isotropic, name=name)
 RT_TAUP_CSV = joinpath(RT_DIR, "reference", "taup_premDSM.csv")
+# Marmousi (step s4, and `check` when the file exists): the model the Marmousi
+# notebooks build with src/imageReader; 802 × 676 samples over 9.2 km × 3.0 km,
+# surface in the LAST column. JLD2 comes with devBootstrap.
+RT_MARMOUSI_FILE = joinpath(flexopt_root, "notebooks", "tmp", "seismicModelMarmousi.jld2")
+"Marmousi vp (km/s) as V[ix, iz], iz = 1 at the surface, and dx, dz (km)"
+function loadMarmousiVp(file=RT_MARMOUSI_FILE; width=9.2, depth=3.0)
+    m = load(file, "output")
+    V = Matrix{Float64}(getfield(m, :Vpv))[:, end:-1:1]
+    nx, nz = size(V)
+    return V, width / (nx - 1), depth / (nz - 1)
+end
 RAYTHEORY_ENV = true

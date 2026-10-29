@@ -16,6 +16,8 @@
 #   s2     1-D spherical: tracer vs τ-p, PREM vs TauP, travel-time curves, ray paths (stages/s2_spherical.jl)
 #          cases: PREM (default) ak135 iasp DWThot TAYAKr vprem
 #   s3     anisotropy: Christoffel branches, VTI/TTI rays and wavefronts, anisotropic Snell (stages/s3_anisotropy.jl)
+#   s4     acoustic rays in Marmousi (smoothed, C² B-spline) vs an eikonal solver (stages/s4_marmousi.jl)
+#          cases: s100 (default, σ = 100 m) s50 s200
 #
 # From a terminal, in the repository root:
 #   julia --project=. dev/raytheory/run.jl check
@@ -36,10 +38,11 @@ RT_STEP_FILES = Dict(
     "s1" => "s1_cartesian.jl",
     "s2" => "s2_spherical.jl",
     "s3" => "s3_anisotropy.jl",
+    "s4" => "s4_marmousi.jl",
 )
 DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS;
-    steps=["check", "s1", "s2", "s3"], defaultStep="check",
-    cases=["PREM", "ak135", "iasp", "DWThot", "TAYAKr", "vprem"], defaultCases=String[])
+    steps=["check", "s1", "s2", "s3", "s4"], defaultStep="check",
+    cases=["PREM", "ak135", "iasp", "DWThot", "TAYAKr", "vprem", "s50", "s100", "s200"], defaultCases=String[])
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("raytheory dev run: ", DEV)
 
