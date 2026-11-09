@@ -37,3 +37,9 @@ only calls existing src/ functions directly.
   radial forms, Cartesian m ≠ 0 check, fluid equation in Q = P/ω
   (Geller & Ohminato 1994), famousEquation entries "1DsphericalPSV_TI_Freq"
   and "1DsphericalFluidQ_Freq".
+- `runPoissonMuBenchmark.jl` -- Poisson 1-D/2-D benchmark of the interpolated
+  Taylor expansion (manuscript §2.1.5): μ / μᶜ sets (nodes, midpoints, dense,
+  ±1/4, ±1/2, outer, Y orders 0/1/2) on field, material or both, against FD_P
+  and the one-centre OPT_P; periodic truncation residual (1-D, 2-D, reusing
+  scripts/runWavePeriodicFDvsOPT.jl) and 1-D Dirichlet solution error (EGU
+  cases). CPU/Float64 recipes. Outputs in scripts/tmp/poisson_mu_benchmark/.

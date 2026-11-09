@@ -69,6 +69,9 @@ function poisson1DRecipe(scheme::AbstractString, Δx::Real; experimental::Bool=f
     @unpack orderBtime, orderBspace, pointsInSpace, pointsInTime, supplementaryOrder, fieldItpl, materItpl = s
     params = @strdict famousEquationType Δ=Δx orderBtime orderBspace pointsInSpace pointsInTime supplementaryOrder fieldItpl materItpl
     params["applicationSchemeVersion"] = s.version
+    # A box-car test function (orderBspace = -1, convFD*) is only allowed in
+    # the strong form; OPT schemes keep the package default (DEFAULT_FORM).
+    params["variationalForm"] = orderBspace == -1 ? :strong : DEFAULT_FORM[]
     return myProduceOrLoad(makeOPTsemiSymbolic, params, "semiSymbolic")
 end
 
