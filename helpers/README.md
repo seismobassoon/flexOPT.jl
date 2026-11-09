@@ -43,3 +43,13 @@ only calls existing src/ functions directly.
   and the one-centre OPT_P; periodic truncation residual (1-D, 2-D, reusing
   scripts/runWavePeriodicFDvsOPT.jl) and 1-D Dirichlet solution error (EGU
   cases). CPU/Float64 recipes. Outputs in scripts/tmp/poisson_mu_benchmark/.
+- `optTestFunctionPrototype.jl` -- stand-alone (no package) closed-form 1-D
+  natural-weak OPT_P for (κT')' = f with an arbitrary test function W
+  (Lagrange interpolants on the stencil; reproduces flexOPT's 1-D residuals).
+  Moment conditions on W: P=3 impossible; P=5 W = 4/15 hat₁ + 11/15 hat₂ (O6);
+  P=7 W = 40/231 hat₁ + 191/231 hat₂ (O8). Derivation:
+  `derivations/optTestFunctionMoments_sympy.py` (sympy).
+- `runPoissonMixedTestFunction.jl` -- the same mixtures inside flexOPT
+  (hat₂ via trialFunctionRefPoints, mixture assembled from component recipes
+  normalised by ΣΓ), periodic residual 1-D (P=3,5,7) and 2-D tensor (P=5).
+  Outputs in scripts/tmp/poisson_mixed_test_function/.
