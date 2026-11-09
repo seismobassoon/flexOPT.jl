@@ -63,6 +63,11 @@ module flexOPT
     include("../src/motorsOPT/famousBoundaryConditions.jl")
     export CerjanBoundarySpec, BoundaryConditionSet, boundary_geometry
     export cerjan_padding, famousBoundaryConditions
+    # moment theory of the test function W (Claude-authored, Nov 2026)
+    include("../src/motorsOPT/testFunctionMoments.jl")
+    using .TestFunctionMoments
+    export bsplineTestFunction, hatTestFunction, centredBspline, mixTestFunctions,
+           testFunctionMoments, predictedOrder, optimalTestFunctionWeights, flexOPTRefPoints
 
     # semi-symbolics operators to fully numerical operators
     #include("fullyNumericalOPT/makeCostFunctions.jl")

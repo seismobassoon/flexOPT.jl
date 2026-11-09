@@ -53,3 +53,5 @@ only calls existing src/ functions directly.
   (hat₂ via trialFunctionRefPoints, mixture assembled from component recipes
   normalised by ΣΓ), periodic residual 1-D (P=3,5,7) and 2-D tensor (P=5).
   Outputs in scripts/tmp/poisson_mixed_test_function/.
+- `testTestFunctionMoments.jl` -- checks src/motorsOPT/testFunctionMoments.jl
+  (exact moment theory of the OPT test function; `julia helpers/testTestFunctionMoments.jl`).
