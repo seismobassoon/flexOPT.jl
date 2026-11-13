@@ -10,6 +10,7 @@
 #   julia --project=. -t auto dev/greenland_nov2026/run.jl step1
 #   julia --project=. -t auto dev/greenland_nov2026/run.jl step2
 #   julia --project=. -t auto dev/greenland_nov2026/run.jl step3
+#   julia --project=. -t auto dev/greenland_nov2026/run.jl step4      (propagation movie, MP4)
 #   julia --project=. -t auto dev/greenland_nov2026/run.jl all standard
 #   julia --project=. -t auto dev/greenland_nov2026/run.jl step2 full --redo=opt
 # From a REPL (fastest):
@@ -30,7 +31,7 @@ greenlandArgs = let a = collect(String, @isdefined(DEV_ARGS) ? DEV_ARGS : ARGS)
     isnothing(k) ? a : a[1:k-1]
 end
 DEV = parseDevArgs(greenlandArgs;
-    steps=["step1", "step2", "step3"], defaultStep="step1",
+    steps=["step1", "step2", "step3", "step4"], defaultStep="step1",
     cases=["quick", "standard", "full"], defaultCases=["quick"])
 length(DEV.cases) == 1 || error("give one grid case at a time (quick | standard | full)")
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
@@ -57,5 +58,8 @@ for step in DEV.steps
     elseif step == "step3"
         @isdefined(optResult) || include(joinpath(GREENLAND_STAGES, "step2_opt.jl"))  # cache hit
         include(joinpath(GREENLAND_STAGES, "step3_traces.jl"))
+    elseif step == "step4"
+        @isdefined(optResult) || include(joinpath(GREENLAND_STAGES, "step2_opt.jl"))  # cache hit
+        include(joinpath(GREENLAND_STAGES, "step4_movie.jl"))
     end
 end

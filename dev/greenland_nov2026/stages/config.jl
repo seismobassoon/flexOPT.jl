@@ -77,11 +77,11 @@ duration = 1200.0          # s: KBS is ~2550 km from Nuuk (Rayleigh ~730 s) + so
 courant = 0.25             # dt = courant * dx / (sqrt(3) * Vp_max)
 optTimeMarchingScheme = :predictor_corrector
 optPredictorMode = :lumped_future
-optCorrectorIterations = 3
-optCorrectorTolerance = 1e-8
+optCorrectorIterations = 8   # 3 left accepted residuals up to 4e-2 (median 3e-4) on the quick grid
+optCorrectorTolerance = 1e-6
 optCorrectorRelaxation = 1.0
 blowupLimit = 1e3          # m: stop if the displacement gets absurd
-snapshotEvery = 25.0       # s, surface maps of the wavefield
+snapshotEvery = 5.0        # s, surface maps of the wavefield (movie frames; 25 s was too coarse)
 traceSampling = 1.0        # s, output traces (the run itself keeps every dt)
 
 # ---------------------------------------------------------------- OPT recipe

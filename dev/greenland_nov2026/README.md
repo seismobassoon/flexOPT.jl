@@ -34,7 +34,8 @@ step3 = traces, record section, snapshots, CSV. Grid case as 2nd argument: `quic
 Figures of step1 (`outputs/step1_<case>/`): `model_*` (maps + section),
 `model3d_icesheet_*` (ETOPO ice surface over bed, exaggerated), `model3d_curved_*`
 (true curved surface in the box, stations, source, slide arrow), `model3d_fence_*`
-(Vs on two vertical slices). step3 adds `snapshots3d_*` (u_z draped on the surface).
+(Vs on two vertical slices). step3 adds `snapshots3d_*` (u_z draped on the surface); step4 writes
+`outputs/step4_<case>/propagation_<case>.mp4` (surface u_z map + traces with a time cursor).
 
 ## Numerics (step2)
 
