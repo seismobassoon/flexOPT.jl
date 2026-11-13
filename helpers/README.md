@@ -55,3 +55,4 @@ only calls existing src/ functions directly.
   Outputs in scripts/tmp/poisson_mixed_test_function/.
 - `testTestFunctionMoments.jl` -- checks src/motorsOPT/testFunctionMoments.jl
   (exact moment theory of the OPT test function; `julia helpers/testTestFunctionMoments.jl`).
+- `greenlandIceWater.jl` -- dev/greenland_nov2026: ETOPO 2022 surface/bed reading, sub-cell air/ice/water/rock mixing, 3-D free-surface closure on a prepared OPT system (pinned air rows + Dietrich mirror moves, 3-D version of src's 2-D `_pinned_void_rows_2d` / `_apply_dietrich_surface_2d`), landslide force history, station ZNE bases.

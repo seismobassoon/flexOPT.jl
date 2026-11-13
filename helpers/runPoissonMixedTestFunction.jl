@@ -37,6 +37,8 @@ include(joinpath(@__DIR__, "..", "scripts", "runWavePeriodicFDvsOPT.jl"))
 
 using CairoMakie
 CairoMakie.activate!()
+# all exports of the moment module, including defaultStencilNodes (not re-exported by flexOPT)
+using .flexOPT.TestFunctionMoments
 
 const TF_SCHEMA_VERSION = "mixed_test_function_v2"
 
@@ -76,8 +78,9 @@ function tf_weights(P)
         hat_order=predictedOrder(defaultStencilNodes(P), hatTestFunction(1); mass=true).order)
 end
 
-const TF_WEIGHTS = Dict(P => tf_weights(P)
-    for P in unique(vcat(values(TF_POINTS)...)) if tf_weights(P) !== nothing)
+const TF_WEIGHTS = let computed = [(P, tf_weights(P)) for P in unique(vcat(values(TF_POINTS)...))]
+    Dict(P => w for (P, w) in computed if w !== nothing)
+end
 
 # ---------------------------------------------------------------- W components
 
