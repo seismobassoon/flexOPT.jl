@@ -8,11 +8,12 @@ notebooks are not touched.
 
 | sub-project | from notebook | steps |
 |---|---|---|
-| `kirishima_oct2026/` | `notebooks/Elastic2DtopoBenchmark_oct2026.ipynb` | `step1`, `step2` (cases `homog`, `heter`) |
+| `kirishima_oct2026/` | `notebooks/Elastic2DtopoBenchmark_oct2026.ipynb` | `step1`, `step2`, `step3` flat free surface (cases `homog`, `heter`; vs SPECFEM2D) |
 | `spherical1Delastic/` | `notebooks/SphericalTI_SH_oct2026.ipynb`, `notebooks/SphericalTI_PSV_oct2026.ipynb` | SH: `step1`, `step2`, `step3a`, `step3a1`, `step3a2`, `step3b`; P-SV: `p1`, `p2`, `p5`; sources + classic DSM benchmark: `p6` |
 | `spherical1DelasticKernel/` | (none; logic of Zhao & Chevrot 2011 and old DSM-Kernel SGTsh/SGTpsv, on `spherical1Delastic/lib`) | `k1` checks, `k2` PREM SGT disks, `k3` Born vs brute force |
 | `raytheory/` | (none; new) | `check` (all tests, no plots), `s1` Cartesian 2-D/3-D, `s2` 1-D spherical (cases PREM ak135 iasp DWThot TAYAKr vprem), `s3` anisotropy; core in `raytheory/lib/` uses only the stdlib |
 | `greenland_nov2026/` | (none; new) | 3-D OPT3 elastic, Greenland box (PREM + ETOPO 2022 ice/ocean), 16 GLISN stations, single force near Nuuk: `step1` model, `step2` recipe + operators + propagation, `step3` traces; grid cases `quick` `standard` `full` |
+| `freeSurfacePlaneWave/` | (none; new) | normal-incidence plane P wave on a flat free surface, homogeneous medium, exact closed-form image-source analytical reference (no SPECFEM, no periodic BC needed -- source/model are x-uniform by construction): `normal` (FD3, OPT3, OPT5, `:direct` marching) |
 
 `spherical1Delastic/lib/` is the single source of the 1-D spherical elastic code (SH, P-SV, fluid in Q = P/ω, recipes, conventional DSM, global systems, synthetics); `helpers/sphericalTI_*.jl` only forward to it.
 
