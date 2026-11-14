@@ -372,7 +372,7 @@ function famousEquation(::Val{:eq_2DsismoTimeIsoHeteroSingleForceExplicit})
 end
 
 function famousEquation(::Val{:eq_2DacousticTime})
-    # 2D wave equation with double couple source
+    # 2D wave equation with single force source
     @variables v(x,y)  u(x,y,t) f(x,y,t)
     
     exprs =  ∂t²(u)- v^2 *(∂x²(u) + ∂y²(u))
@@ -387,6 +387,22 @@ function famousEquation(::Val{:eq_2DacousticTime})
     return exprs, fields, vars, extexprs, extfields, extvars, coordinates, ∂, ∂²
 end
 
+
+function famousEquation(::Val{:eq_3DacousticTime})
+    # 3D wave equation with single force source
+    @variables v(x,y,z)  u(x,y,z,t) f(x,y,z,t)
+    
+    exprs =  ∂t²(u)- v^2 *(∂x²(u) + ∂y²(u)+∂z²(u))
+    fields= u
+    vars = v
+
+    extexprs = f
+    extfields = f
+    extvars = f
+    coordinates =(x,y,z,t)
+    ∂, ∂² = usefulPartials(coordinates)
+    return exprs, fields, vars, extexprs, extfields, extvars, coordinates, ∂, ∂²
+end
 
 function famousEquation(::Val{:eq_2DacousticHomoTime})
     # 2D wave equation with double couple source
