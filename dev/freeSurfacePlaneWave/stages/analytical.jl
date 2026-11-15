@@ -1,69 +1,60 @@
 # dev/freeSurfacePlaneWave/stages/analytical.jl
 # Exact closed-form displacement for a homogeneous half-space (z<=0 solid,
-# free surface at z=0) driven by a force PER UNIT AREA s(t) at depth z0,
-# uniform in x -- i.e. a genuine normal-incidence plane P wave. This is the
-# method-of-images solution of the 1-D wave equation rho*u_tt = kappa*u_zz +
-# s(t)*delta(z-z0): the free (traction-free, Neumann) surface at z=0 is
-# represented by an EVEN image source at z_image=-z0 (same sign -- a
-# Dirichlet/fixed boundary would need the opposite sign). No SPECFEM, no
-# out-of-plane numerical integral (c.f. src/elasticGreens2D.jl's full 2-D/
-# 3-D point-source Green's function): this is the exact solution, limited
-# only by how finely `dt_fine` samples the cumulative force integral below.
-function _cumulative_integral(f, t0, dt, t1)
-    ts = collect(t0:dt:t1)
-    s = f.(ts)
-    S = zeros(Float64, length(ts))
-    for i in 2:length(ts)
-        S[i] = S[i - 1] + dt * (s[i - 1] + s[i]) / 2
-    end
-    return ts, S
-end
-
-function _sample_linear_zero(ts, S, t)
-    (t < ts[1] || t > ts[end]) && return 0.0
-    position = (t - ts[1]) / (ts[2] - ts[1]) + 1
-    lower = clamp(floor(Int, position), 1, length(ts))
-    lower == length(ts) && return S[end]
-    fraction = position - lower
-    return S[lower] + fraction * (S[lower + 1] - S[lower])
-end
-
+# free surface at z=0): a normal-incidence plane P wave expressed directly
+# as two counter-propagating travelling waves, NOT as a point/sheet force
+# convolved against a Green's function. No "areal force density" or
+# dx-normalisation convention to get right, no cumulative-force integral
+# S(t), no interpolation -- the formula is evaluated in closed form at any
+# (z,t) directly (config.jl's planeWaveUz), and is EXACTLY what is used to
+# build the simulations' own initial condition (see opt_propagate.jl /
+# fd_propagate.jl), so this is as much a definition as a cross-check: what
+# is being verified is that FD3/OPT3/OPT5, started from this exact field at
+# t=-dt and t=0 with NO forcing at all afterwards, keep reproducing it.
+#
+# Derivation (method of images, expressed as plane waves instead of a
+# static mirror source). Write a rightward-travelling pulse
+# w(t - (z-z0)/vp) and a leftward-travelling pulse of the SAME sign and
+# SAME shape w(t + (z-z0)/vp). Since u_z = (either term), and
+#   sigma_zz = (lambda+2mu) d(u_z)/dz,
+# term by term: d/dz[w(t-(z-z0)/vp)] = -(1/vp) w'(t-(z-z0)/vp), and
+#               d/dz[w(t+(z-z0)/vp)] = +(1/vp) w'(t+(z-z0)/vp).
+# At z=0 these two derivatives are exactly equal in magnitude and opposite
+# in sign (both pulses share the same argument magnitude |z-z0|/vp there),
+# so their sum is EXACTLY ZERO: sigma_zz(0,t) = 0 for every t, for ANY
+# pulse shape w -- this is the free-surface traction condition, satisfied
+# by construction, with no reference to w's particular shape at all. This
+# is the "same-sign (even) image" of a Neumann boundary, the plane-wave
+# analogue of the static method-of-images mirror source. Dropping the
+# second term instead gives the exact unbounded (no-boundary) direct-wave-
+# only solution used by the "nosurface" control (trivially satisfies the
+# free 1-D wave equation everywhere, no boundary involved at all).
+#
+# A purely vertical, x-independent field like this excites ONLY P-wave
+# (dilatational) motion: u_x is identically zero everywhere (no shear is
+# excited at all without x-dependence), confirmed directly from the 2-D
+# elastic equations of motion with partial_x == 0 throughout.
 """
-    freeSurfaceNormalIncidenceP(times, depths; z0, vp, rho, dx, line_force,
-        force_time_function, source_frequency, tail_periods=6.0, dt_fine=nothing)
+    planeWaveNormalIncidenceP(times, depths; z0, vp, amplitude, pulse, include_image=true)
 
-Exact displacement u_z(depth, time) for a vertical force `line_force *
-force_time_function(t)` (N/m, the SAME per-column magnitude convention used
-by every other benchmark here) applied uniformly at EVERY column at depth
-`z0`: pass `line_force = sourceForce` and `dx`, and this function divides by
-`dx` itself to get the areal force density (N/m^2) the 1-D image-source
-formula needs.
+Exact normal-incidence plane-P-wave displacement u_z(depth, time), z<=0.
+`z0` is a travel-time phase reference only (there is no source location in
+this benchmark). `pulse` is the scalar waveform (config.jl's `rickerSource`,
+shared with the simulations' own initial condition).
 """
-function freeSurfaceNormalIncidenceP(times, depths; z0, vp, rho, dx,
-    line_force, force_time_function, source_frequency,
-    tail_periods::Real=6.0, dt_fine=nothing)
+function planeWaveNormalIncidenceP(times, depths; z0, vp, amplitude, pulse,
+    include_image::Bool=true)
     t = Float64.(collect(times))
-    length(t) >= 2 || throw(ArgumentError("at least two times are required"))
-    dtf = isnothing(dt_fine) ? minimum(diff(t)) / 8 : Float64(dt_fine)
-    margin = tail_periods / Float64(source_frequency)
-    t0 = first(t) - margin
-    t1 = last(t) + margin
-    arealForceDensity = Float64(line_force) / Float64(dx)
-    ts, S = _cumulative_integral(
-        tau -> arealForceDensity * force_time_function(tau), t0, dtf, t1)
-    zImage = -Float64(z0)
-    prefactor = inv(2 * Float64(rho) * Float64(vp))
     depthList = collect(Float64, depths)
     u = zeros(Float64, length(t), length(depthList))
     for (iz, zd) in enumerate(depthList)
-        delayDirect = abs(zd - z0) / vp
-        delayImage = abs(zd - zImage) / vp
         for (it, time) in enumerate(t)
-            u[it, iz] = prefactor * (
-                _sample_linear_zero(ts, S, time - delayDirect) +
-                _sample_linear_zero(ts, S, time - delayImage))
+            direct = pulse(time - (zd - z0) / vp)
+            image = include_image ? pulse(time + (zd - z0) / vp) : 0.0
+            u[it, iz] = amplitude * (direct + image)
         end
     end
     return (time=t, depths=depthList, displacement=u,
-        convention=:image_source_1d_free_surface_normal_incidence_P)
+        convention=include_image ?
+            :counterpropagating_plane_waves_free_surface_normal_incidence_P :
+            :direct_plane_wave_only_no_surface)
 end

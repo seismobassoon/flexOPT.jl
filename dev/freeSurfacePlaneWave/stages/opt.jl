@@ -3,10 +3,13 @@ optCacheParams = Dict{String,Any}(
     "stage" => "opt", "codeVersion" => CODE_VERSION["opt"],
     "grid" => (x0=first(x), z0=first(z), nx=nx, nz=nz, dx=dx),
     "duration" => duration, "outputSampling" => outputSampling,
-    "source" => (position=sourcePosition, frequency=sourceFrequency, delay=sourceDelay,
-        force=sourceForce, nColumns=length(sourceNodesX)),
+    "planewave" => (z0=z0, frequency=sourceFrequency, delay=sourceDelay,
+        amplitude=planewaveAmplitude),
     "boundaries" => (cerjanCells=cerjanCells, damping=cerjan.damping),
     "vp0" => vp0, "vs0" => vs0, "rho0" => rho0,
+    "cflFraction" => (@isdefined(PLANEWAVE_CFL_FRACTION) ? PLANEWAVE_CFL_FRACTION[] : 0.20),
+    "boundaryWeight" => string(@isdefined(PLANEWAVE_BOUNDARY_WEIGHT) ? PLANEWAVE_BOUNDARY_WEIGHT[] : 1.0),
+    "overlapMode" => string(@isdefined(PLANEWAVE_OVERLAP_MODE) ? PLANEWAVE_OVERLAP_MODE[] : :additive),
 )
 optCachePrefix = "opt_planewave"
 devRedo!("opt", optCacheParams, PLANEWAVE_CACHE_DIR, optCachePrefix)

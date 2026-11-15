@@ -1,8 +1,8 @@
 # dev/freeSurfacePlaneWave/stages/compare.jl
 analyticalFineTimes = collect(0.0:0.01:duration)
-analyticalResult = freeSurfaceNormalIncidenceP(analyticalFineTimes, observerDepths;
-    z0=z0, vp=vp0, rho=rho0, dx=dx, line_force=sourceForce,
-    force_time_function=rickerSource, source_frequency=sourceFrequency)
+analyticalResult = planeWaveNormalIncidenceP(analyticalFineTimes, observerDepths;
+    z0=z0, vp=vp0, amplitude=planewaveAmplitude, pulse=rickerSource,
+    include_image=applyFreeSurface)
 
 function _depth_trace(uz, zaxis, depth, timesAxis)
     iz = argmin(abs.(zaxis .- depth))
@@ -10,10 +10,9 @@ function _depth_trace(uz, zaxis, depth, timesAxis)
     (time=Float64.(timesAxis), values=Float64.(uz[midColumn, iz, :]))
 end
 
-function _analytical_at(depth, t)
-    col = argmin(abs.(analyticalResult.depths .- depth))
-    _sample_linear_zero(analyticalResult.time, analyticalResult.displacement[:, col], t)
-end
+# Exact closed form: no interpolation needed, evaluate planeWaveUz directly
+# at whatever time the simulation reports.
+_analytical_at(depth, t) = planeWaveUz(depth, t; includeImage=applyFreeSurface)
 
 compareFigure = Figure(size=(1100, 220 * length(observerDepths)))
 compareMetrics = NamedTuple[]
@@ -39,7 +38,7 @@ for (row, depth) in enumerate(observerDepths)
     end
     push!(compareMetrics, (depth=depth, FD3=metric(fdTrace), OPT3=metric(optTrace), OPT5=metric(opt5Trace)))
 end
-devSave(compareFigure, "vs_analytical_uz")
+devSave(compareFigure, applyFreeSurface ? "vs_analytical_uz" : "vs_analytical_uz_nosurface")
 foreach(display, compareMetrics)
 metricsPath = joinpath(DEV_OUTPUT_DIR[], DEV_STEP[], "vs_analytical_metrics.jld2")
 jldsave(metricsPath; compareMetrics, observerDepths, optCacheFile, fdCacheFile)

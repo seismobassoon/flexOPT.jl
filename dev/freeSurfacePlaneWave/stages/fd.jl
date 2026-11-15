@@ -3,8 +3,8 @@ fdCacheParams = Dict{String,Any}(
     "stage" => "fd", "codeVersion" => CODE_VERSION["fd"],
     "grid" => (x0=first(x), z0=first(z), nx=nx, nz=nz, dx=dx),
     "duration" => duration, "outputSampling" => outputSampling,
-    "source" => (position=sourcePosition, frequency=sourceFrequency, delay=sourceDelay,
-        force=sourceForce, nColumns=nx),
+    "planewave" => (z0=z0, frequency=sourceFrequency, delay=sourceDelay,
+        amplitude=planewaveAmplitude),
     "boundaries" => (cerjanCells=cerjanCells, damping=cerjan.damping),
     "vp0" => vp0, "vs0" => vs0, "rho0" => rho0,
 )

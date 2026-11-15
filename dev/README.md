@@ -14,6 +14,7 @@ notebooks are not touched.
 | `raytheory/` | (none; new) | `check` (all tests, no plots), `s1` Cartesian 2-D/3-D, `s2` 1-D spherical (cases PREM ak135 iasp DWThot TAYAKr vprem), `s3` anisotropy; core in `raytheory/lib/` uses only the stdlib |
 | `greenland_nov2026/` | (none; new) | 3-D OPT3 elastic, Greenland box (PREM + ETOPO 2022 ice/ocean), 16 GLISN stations, single force near Nuuk: `step1` model, `step2` recipe + operators + propagation, `step3` traces; grid cases `quick` `standard` `full` |
 | `freeSurfacePlaneWave/` | (none; new) | normal-incidence plane P wave on a flat free surface, homogeneous medium, exact closed-form image-source analytical reference (no SPECFEM, no periodic BC needed -- source/model are x-uniform by construction): `normal` (FD3, OPT3, OPT5, `:direct` marching) |
+| `new_Paul_models/` | (none; new) | `figures`: every field of every snapshot of Paul's StagYY 2-D annulus models (`ForNobu/<model>/Output`), read with `src/batchFiles/batchStagYY.jl`; one PNG per field (disk, lateral anomaly, radial profile) + one overview sheet per snapshot; cases = model folders (`G1m20_sb11`, `G1m20_sb21`, ...); `synthetics`: FD3 whole-Earth P-SV, PREM and PREM×(1+δ) of sb11/03140, sb21/03240, 200-km sources at N, E, S, W, stations every 2°; `phases`: PREM τ–p windows, δt, dlnA, ray maps |
 
 `spherical1Delastic/lib/` is the single source of the 1-D spherical elastic code (SH, P-SV, fluid in Q = P/ω, recipes, conventional DSM, global systems, synthetics); `helpers/sphericalTI_*.jl` only forward to it.
 
