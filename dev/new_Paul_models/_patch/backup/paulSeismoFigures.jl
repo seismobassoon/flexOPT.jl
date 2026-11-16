@@ -358,3 +358,55 @@ function phaseSummaryFigure(meas, phases, models)
         fontsize = 15)
     return fig
 end
+
+"""
+    anrSectionFigure(results, names, pole, comp)
+
+Record section in the style of the ANR 2027 figure
+(data/earth2D_stagyy/prototype_python/make_figure.py): for each heterogeneous
+model and each side of the source, grey = model trace, red = δu = model − PREM,
+both divided by max|model trace| for t < SEISMO_ANR.tRef and clipped at
+±SEISMO_ANR.clip; traces every SEISMO_ANR.everyDeg of epicentral distance.
+"""
+function anrSectionFigure(results, names, pole, comp; cfg = SEISMO_ANR)
+    t = results[("PREM", pole)]["time"]; dt = t[2] - t[1]
+    φ = seismoReceivers.φ
+    key = compKey(comp)
+    v0 = seismoVelocity(results[("PREM", pole)][key], dt)
+    early = t .< cfg.tRef
+    sp = 0.48 * cfg.everyDeg
+    models = names[2:end]
+    fig = Figure(size = (620 * 2 * length(models), 1150))
+    sides = ((1, "φ = $(round(Int, sourceAngle(pole))) + Δ"), (-1, "φ = $(round(Int, sourceAngle(pole))) − Δ"))
+    col = 0
+    for m in models
+        v = seismoVelocity(results[(m, pole)][key], dt)
+        for (sgn, sideLabel) in sides
+            col += 1
+            ax = Axis(fig[1, col]; xlabel = "time (s)", ylabel = col == 1 ? "epicentral distance Δ (°)" : "",
+                title = "$(shortName(m)), $(compName(comp)), $sideLabel", titlesize = 14,
+                xgridvisible = false, ygridvisible = false, rightspinevisible = false, topspinevisible = false,
+                yticks = 0:30:180)
+            xg = Float64[]; yg = Float64[]; xr = Float64[]; yr = Float64[]
+            for Δ in 0.0:cfg.everyDeg:180.0
+                φt = mod(sourceAngle(pole) + sgn * Δ, 360)
+                j = findfirst(x -> isapprox(x, φt; atol = 1e-6), φ)
+                j === nothing && continue
+                ref = maximum(abs, @view v[early, j])
+                ref > 0 || continue
+                append!(xg, t); push!(xg, NaN)
+                append!(yg, Δ .+ sp .* clamp.(v[:, j] ./ ref, -cfg.clip, cfg.clip)); push!(yg, NaN)
+                append!(xr, t); push!(xr, NaN)
+                append!(yr, Δ .+ sp .* clamp.((v[:, j] .- v0[:, j]) ./ ref, -cfg.clip, cfg.clip)); push!(yr, NaN)
+            end
+            lines!(ax, xg, yg; color = (:gray60, 1.0), linewidth = 0.8, label = "$(shortName(m))")
+            lines!(ax, xr, yr; color = :firebrick, linewidth = 0.7, label = "δu = $(shortName(m)) − PREM")
+            col == 1 && axislegend(ax; position = :rb, labelsize = 11, framevisible = true)
+            xlims!(ax, 0, cfg.tmax); ylims!(ax, -4, 184)
+        end
+    end
+    Label(fig[0, :], "$(compName(comp)) ground velocity, $(pole) source ($(round(Int, SEISMO.sourceDepth / 1e3)) km, " *
+        "$(SEISMO.dip)° $(SEISMO.slip), T = $(round(Int, SEISMO.period)) s); each trace / max|model trace| for " *
+        "t < $(round(Int, cfg.tRef)) s, clipped ±$(cfg.clip)", fontsize = 16)
+    return fig
+end

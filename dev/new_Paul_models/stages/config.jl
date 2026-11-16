@@ -47,7 +47,7 @@ SEISMO_WINDOW = (pre = 25.0, post = 45.0, maxLag = 15.0)  # s around the PREM ti
 SEISMO_SECTION_PHASES = ["P", "pP", "PcP", "PP", "PKP", "S", "sS", "ScS", "SKS", "SS"]
 
 # record sections (wiggles): every `every`-th station, trace / max|PREM trace| × gain, clipped
-SEISMO_SECTION = (gain = 3.0, clip = 1.2, every = 1)          # section_overlay_*: all stations, 3 models + ray curves
+SEISMO_SECTION = (gain = 3.0, clip = 1.2, every = 2)          # section_overlay_*: all stations, 3 models + ray curves
 SEISMO_ANR = (everyDeg = 6.0, tRef = 1500.0, clip = 1.6, tmax = 2400.0)  # section_* (ANR-2027 style)
 
 # ---- features (step `features`): which measurement separates sb11 from sb21?
@@ -60,4 +60,23 @@ FEATURES = (
     nReal = 20,                 # noise realisations per trace
     zThreshold = 2.0,           # |z| > 2: station distinguishes the two models
     seed = 20261115,
+    # coda after each phase window: [t_PREM + post, + codaLength]
+    codaLength = 150.0, codaThreshold = 0.2, codaMinSep = 15.0,   # s, × phase envelope peak, s
+    # phase pairs: amplitude ratio and differential delay at the same station
+    # features drawn for every model incl. PREM, per phase (vs φ and as distributions)
+    showFeatures = (:kurtosis, :codaCount, :lnRMS, :centroidFreq),
+    showPhases = ["P", "PcP", "PP", "S", "ScS", "SKS", "SS"],
+    pairs = [("ScS", "S"), ("PcP", "P"), ("SKS", "S"), ("SS", "S"), ("PP", "P"), ("sS", "S"), ("pP", "P"), ("PKIKP", "PKP")],
+)
+
+# ---- neutrinos (step `neutrinos`): detectors at the surface at SEISMO_SOURCE_ANGLES
+NU = (
+    binning = (energies = logrange(1.0, 100.0, 200), cosθgrid = range(-1.0, 0.0, 400)),  # = notebook (cached flux)
+    Δbaseline = 50e3,          # m, path segments
+    detectorDepth = 2.5e3,     # m
+    massKg = 20.0e9,           # perfect detector, 20 Mt
+    years = 1.0,               # Δχ² scales with mass × years
+    yeCore = 0.466, yeMantle = 0.4955,        # PREM Z/A (core, mantle)
+    d670 = 670e3,              # zenith classes: upper / lower mantle / outer / inner core
+    energyBands = [(1.0, 3.0), (3.0, 8.0), (8.0, 20.0), (20.0, 100.0)],   # GeV
 )

@@ -18,11 +18,31 @@ fd.uz_previous[fd.material] .= Float32.(planeWaveUz.(fdZ2D[fd.material], -fd.dt)
 fd.uz[fd.material] .= Float32.(planeWaveUz.(fdZ2D[fd.material], 0.0))
 fdSteps = ceil(Int, duration / fd.dt)
 fdOutputStride = max(1, round(Int, outputSampling / fd.dt))
+# Pin the two lateral (x) edge columns to the exact analytical solution
+# after every step. step_elastic_wave_2d! only ever updates INTERIOR
+# columns (its loops run i in 2:nx-1), so the edge columns are otherwise
+# simply frozen forever at whatever they were last set to. That is
+# invisible for a field that starts and stays at rest (the old point-
+# source design, edges always exactly 0), but becomes a real (and wrong)
+# boundary condition the instant the IC is nonzero everywhere, as it now
+# is: the frozen edge disagrees more and more with its evolving interior
+# neighbour, leaking a spurious x-gradient one column inward per step
+# (this is what xSpreadFD/xSpreadOPT below are catching). Re-pinning to
+# the exact solution after every step keeps the edges honest regardless
+# of domain width -- nxHalfWidth does not need to be grown to outrun this
+# at the wave speed.
+function pinLateralEdgesFD!()
+    for i in (1, size(fd.ux, 1)), k in 1:size(fd.ux, 2)
+        fd.ux[i, k] = 0
+        fd.uz[i, k] = fd.material[i, k] ? Float32(planeWaveUz(fdZ2D[i, k], fd.time)) : 0f0
+    end
+end
 fdFramesX = Matrix{Float32}[copy(fd.ux)]
 fdFramesZ = Matrix{Float32}[copy(fd.uz)]
 fdTimes = Float64[0.0]
 for step in 1:fdSteps
     step_elastic_wave_2d!(fd)
+    pinLateralEdgesFD!()
     if step % fdOutputStride == 0 || step == fdSteps
         push!(fdFramesX, copy(fd.ux)); push!(fdFramesZ, copy(fd.uz)); push!(fdTimes, fd.time)
     end

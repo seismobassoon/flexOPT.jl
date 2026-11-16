@@ -14,7 +14,15 @@
 #   kurtosis       m4/m2² (impulsive vs emergent)
 #   ccDelay        cross-correlation delay against the noise-free PREM trace (s)
 #   decorrelation  1 − max normalised cc against the noise-free PREM trace
+#   codaCount      phase windows only: number of distinct later arrivals in the coda
+#                  [t + post, t + post + codaLength]: envelope maxima > codaThreshold × the
+#                  phase-window envelope peak, at least codaMinSep apart
+#   codaEnergyRatio ln(coda energy / phase-window energy)
+#   codaDecay      slope of ln(envelope) in the coda (1/s; more negative = faster decay)
 #   lnHV           ln(rms horizontal / rms vertical)   (component "HV")
+# Phase pairs (window "ScS/S" etc., same station, same noise realisation):
+#   lnAmpRatio     lnRMS(phase 1) − lnRMS(phase 2)   (source and site cancel)
+#   diffDelay      ccDelay(phase 1) − ccDelay(phase 2)  (differential time, s)
 #
 # Discrimination: each model trace gets `nReal` realisations of band-limited
 # Gaussian noise (same band as the source, rms = noiseLevel × rms of the PREM
@@ -25,7 +33,8 @@
 # so that a phase seen at only a few stations does not win) and by rms(clamp(z, ±10)).
 
 const FEATURE_NAMES = (:lnRMS, :lnPeak, :centroidFreq, :bandwidth, :duration,
-    :energyCentroid, :kurtosis, :ccDelay, :decorrelation)
+    :energyCentroid, :kurtosis, :ccDelay, :decorrelation, :codaCount, :codaEnergyRatio, :codaDecay)
+const PAIR_FEATURE_NAMES = (:lnAmpRatio, :diffDelay)
 
 "Unit-rms Gaussian noise with the source spectrum exp(−(f T)²) (Gaussian kernel)."
 function bandLimitedNoise(rng, n, dt, period)
@@ -62,8 +71,28 @@ function ccDelayIdx(ref, x, idx, nL, dt)
     return (shift * dt, best)
 end
 
-"Feature vector (FEATURE_NAMES order) of trace x on sample range idx."
-function segmentFeatures(x, ref, idx, dt, nL)
+"Coda features from the envelope `env` (phase samples idx, coda samples cidx)."
+function codaFeatures(x, env, idx, cidx, dt, cfg)
+    (cidx === nothing || length(cidx) < 8) && return (NaN, NaN, NaN)
+    peak = maximum(@view env[idx])
+    peak > 0 || return (NaN, NaN, NaN)
+    e = @view env[cidx]
+    minSep = max(1, round(Int, cfg.codaMinSep / dt))
+    count, last = 0, -10^9
+    for i in 2:length(e)-1
+        if e[i] >= e[i-1] && e[i] > e[i+1] && e[i] > cfg.codaThreshold * peak && i - last >= minSep
+            count += 1; last = i
+        end
+    end
+    eP = sum(abs2, @view x[idx]); eC = sum(abs2, @view x[cidx])
+    tt = (0:length(e)-1) .* dt
+    le = log.(max.(e, 1e-30 * peak))
+    slope = sum((tt .- mean(tt)) .* (le .- mean(le))) / sum(abs2, tt .- mean(tt))
+    return (Float64(count), eP > 0 ? log(eC / eP) : NaN, slope)
+end
+
+"Feature vector (FEATURE_NAMES order) of trace x on sample range idx (coda: cidx, envelope env)."
+function segmentFeatures(x, ref, idx, dt, nL; env = nothing, cidx = nothing, cfg = nothing)
     seg = x[idx]
     n = length(seg)
     e = sum(abs2, seg)
@@ -81,7 +110,9 @@ function segmentFeatures(x, ref, idx, dt, nL)
     m2 = e / n
     kurt = mean(seg .^ 4) / m2^2
     δt, cc = ccDelayIdx(ref, x, idx, nL, dt)
-    return [log(sqrt(m2)), log(maximum(abs, seg)), 1e3fc, 1e3bw, (t90 - t10) * dt, tc, kurt, δt, 1 - cc]
+    coda = env === nothing ? (NaN, NaN, NaN) : codaFeatures(x, env, idx, cidx, dt, cfg)
+    return [log(sqrt(m2)), log(maximum(abs, seg)), 1e3fc, 1e3bw, (t90 - t10) * dt, tc, kurt, δt, 1 - cc,
+        coda...]
 end
 
 """
@@ -98,6 +129,10 @@ function featureWindows(table, Δgrid, cfg)
             tp = table[ph]["time"][i]
             isfinite(tp) ? (tp - cfg.pre, tp + cfg.post) : nothing
         end))
+    end
+    for (a, b) in cfg.pairs
+        (haskey(table, a) && haskey(table, b)) || continue
+        push!(wins, (label = "$a/$b", kind = :pair, window = (φ, pole) -> nothing, pair = (a, b)))
     end
     for t0 in cfg.slideStart:cfg.slideStep:(cfg.duration - cfg.slideLength - cfg.maxLag)  # room for the cc lag
         t1 = t0 + cfg.slideLength
@@ -137,24 +172,38 @@ function computeFeatures(results, models, φs, windows, cfg)
                     for r in 1:cfg.nReal
                         traces[r+1] = v[:, j] .+ σ[j] .* bandLimitedNoise(rng, length(t), dt, cfg.period)
                     end
+                    envs = [abs.(DSP.hilbert(tr)) for tr in traces]
                     for w in windows
+                        w.kind === :pair && continue
                         tw = w.window(φs[j], pole)
                         tw === nothing && continue
                         idx = findall(x -> tw[1] <= x <= tw[2], t)
                         (length(idx) >= 8 && first(idx) > nL && last(idx) + nL <= length(t)) || continue
+                        cidx = nothing
+                        if w.kind === :phase
+                            c = findall(x -> tw[2] < x <= tw[2] + cfg.codaLength, t)
+                            length(c) >= 8 && last(c) < length(t) && (cidx = c)
+                        end
                         A = arrays[w.label]
                         for r in 1:cfg.nReal+1
-                            A[j, :, r] .= segmentFeatures(traces[r], @view(ref[:, j]), idx, dt, nL)
+                            A[j, :, r] .= segmentFeatures(traces[r], @view(ref[:, j]), idx, dt, nL;
+                                env = w.kind === :phase ? envs[r] : nothing, cidx = cidx, cfg = cfg)
                         end
                     end
                 end
-                for (lab, A) in arrays
-                    out[(pole, comp, m, lab)] = A
+                for w in windows
+                    w.kind === :pair || (out[(pole, comp, m, w.label)] = arrays[w.label]; continue)
+                    A1 = arrays[w.pair[1]]; A2 = arrays[w.pair[2]]
+                    P = fill(NaN, length(φs), length(PAIR_FEATURE_NAMES), cfg.nReal + 1)
+                    P[:, 1, :] .= A1[:, 1, :] .- A2[:, 1, :]          # lnRMS difference
+                    P[:, 2, :] .= A1[:, 8, :] .- A2[:, 8, :]          # ccDelay difference
+                    out[(pole, comp, m, w.label)] = P
                 end
                 @info "features" pole comp model = m
             end
         end
         for m in models, w in windows
+            w.kind === :pair && continue
             h = out[(pole, :horiz, m, w.label)][:, 1:1, :]
             vv = out[(pole, :vert, m, w.label)][:, 1:1, :]
             out[(pole, :HV, m, w.label)] = h .- vv          # lnRMS_h − lnRMS_v
@@ -163,7 +212,7 @@ function computeFeatures(results, models, φs, windows, cfg)
     return out
 end
 
-featureList(comp) = comp === :HV ? (:lnHV,) : FEATURE_NAMES
+featureList(comp, kind = :phase) = comp === :HV ? (:lnHV,) : kind === :pair ? PAIR_FEATURE_NAMES : FEATURE_NAMES
 
 """
     scoreFeatures(feat, models, windows, cfg) -> Vector of NamedTuples, sorted best first
@@ -172,8 +221,9 @@ function scoreFeatures(feat, models, windows, cfg)
     m1, m2 = models
     rows = NamedTuple[]
     for pole in SEISMO_POLES, comp in (:vert, :horiz, :HV), w in windows
+        (comp === :HV && w.kind === :pair) && continue
         A1 = feat[(pole, comp, m1, w.label)]; A2 = feat[(pole, comp, m2, w.label)]
-        for (k, fname) in enumerate(featureList(comp))
+        for (k, fname) in enumerate(featureList(comp, w.kind))
             z = Float64[]; dfree = Float64[]
             for j in axes(A1, 1)
                 a = filter(isfinite, A1[j, k, 2:end]); b = filter(isfinite, A2[j, k, 2:end])
@@ -200,7 +250,7 @@ compLabel(c) = c === :vert ? "vertical" : c === :horiz ? "horizontal" : "H/V"
 "Heat map: detectable-station fraction, rows feature×component, columns windows."
 function featureScoreFigure(rows, windows, pole, cfg)
     labs = [w.label for w in windows]
-    rowKeys = [(c, f) for c in (:vert, :horiz) for f in FEATURE_NAMES]
+    rowKeys = [(c, f) for c in (:vert, :horiz) for f in (FEATURE_NAMES..., PAIR_FEATURE_NAMES...)]
     push!(rowKeys, (:HV, :lnHV))
     M = fill(NaN, length(labs), length(rowKeys))
     for r in rows
@@ -219,8 +269,8 @@ function featureScoreFigure(rows, windows, pole, cfg)
         isfinite(M[i, k]) && text!(ax, i, k; text = string(round(Int, M[i, k])), align = (:center, :center),
             fontsize = 9, color = M[i, k] > 110 ? :black : :white)
     end
-    nPh = count(w -> w.kind === :phase, windows)
-    vlines!(ax, [nPh + 0.5]; color = :white, linewidth = 2)
+    nPh = count(w -> w.kind === :phase, windows); nPair = count(w -> w.kind === :pair, windows)
+    vlines!(ax, [nPh + 0.5, nPh + nPair + 0.5]; color = :white, linewidth = 2)
     Colorbar(fig[1, 2], hm; label = "detectable stations")
     return fig
 end
@@ -230,36 +280,37 @@ function topFeaturesFigure(rows, feat, models, φs; n = 12, ncol = 4)
     top = rows[1:min(n, length(rows))]
     nrow = cld(length(top), ncol)
     fig = Figure(size = (520 * ncol, 330 * nrow + 60))
-    colors = (:firebrick, :dodgerblue)
     for (i, r) in enumerate(top)
         ax = Axis(fig[cld(i, ncol), mod1(i, ncol)]; xlabel = "station angle φ (°)", ylabel = string(r.feature),
             xticks = 0:60:360, titlesize = 12,
             title = @sprintf("#%d %s · %s · %s src · %d/%d st.", i, r.window, compLabel(r.comp), r.source,
                 r.nDetectable, r.nStations))
-        k = findfirst(==(r.feature), collect(featureList(r.comp)))
+        k = findfirst(==(r.feature), collect(featureList(r.comp, r.kind)))
         for (mi, m) in enumerate(models)
             A = feat[(r.source, r.comp, m, r.window)]
             ok = findall(j -> isfinite(A[j, k, 1]), axes(A, 1))
             isempty(ok) && continue
             μ = [A[j, k, 1] for j in ok]
             s = [std(filter(isfinite, A[j, k, 2:end])) for j in ok]
-            band!(ax, φs[ok], μ .- s, μ .+ s; color = (colors[mi], 0.25))
-            scatterlines!(ax, φs[ok], μ; color = colors[mi], markersize = 4, linewidth = 1,
-                label = shortName(m))
+            c = modelColor(m)
+            band!(ax, φs[ok], μ .- s, μ .+ s; color = (c, 0.25))
+            scatterlines!(ax, φs[ok], μ; color = c, markersize = m == "PREM" ? 3 : 4,
+                linewidth = m == "PREM" ? 1.4 : 1, label = shortName(m))
         end
         i == 1 && axislegend(ax; position = :rt, labelsize = 10)
         xlims!(ax, 0, 360)
     end
-    Label(fig[0, :], "Best discriminating features (noise-free value, band = ±1σ over the noise realisations)",
+    Label(fig[0, :], "Best discriminating features sb11 vs sb21, PREM in black (noise-free value, band = ±1σ over the noise realisations)",
         fontsize = 16)
     return fig
 end
 
 "Best score per feature (any window/component/source): which kind of measurement works."
 function featureRankingFigure(rows)
-    fnames = vcat(collect(FEATURE_NAMES), [:lnHV])
-    fig = Figure(size = (1500, 650))
-    for (col, kind, title) in ((1, :phase, "phase windows"), (2, :slide, "sliding windows"))
+    fnames = vcat(collect(FEATURE_NAMES), collect(PAIR_FEATURE_NAMES), [:lnHV])
+    fig = Figure(size = (2100, 800))
+    for (col, kind, title) in ((1, :phase, "phase windows"), (2, :pair, "phase pairs (ratios, differential times)"),
+            (3, :slide, "sliding windows"))
         best = Float64[]; lab = String[]
         for f in fnames
             sel = [r for r in rows if r.feature == f && r.kind == kind]
@@ -274,5 +325,70 @@ function featureRankingFigure(rows)
             colorrange = (0, 180))
         xlims!(ax, 0, 180)
     end
+    return fig
+end
+
+
+"Black PREM, red first heterogeneous model, blue second (order of SEISMO_MODEL_NAMES)."
+function modelColor(m)
+    m == "PREM" && return :black
+    i = findfirst(==(m), SEISMO_MODEL_NAMES)
+    return i == 2 ? :firebrick : i == 3 ? :dodgerblue : :darkgreen
+end
+
+"""
+    featureByPhaseFigure(feat, models, fname, phases, φs)
+
+One feature (e.g. :kurtosis, :codaCount) in the phase windows: rows = sources,
+columns = phases, each on its natural component (last leg P -> vertical, S ->
+horizontal); every model incl. PREM, noise-free value ± noise std.
+"""
+function featureByPhaseFigure(feat, models, fname, phases, φs)
+    k = findfirst(==(fname), collect(FEATURE_NAMES))
+    k === nothing && error("unknown feature $fname")
+    fig = Figure(size = (430 * length(phases), 300 * length(SEISMO_POLES) + 80))
+    for (row, pole) in enumerate(SEISMO_POLES), (col, ph) in enumerate(phases)
+        comp = phaseComponent(ph)
+        ax = Axis(fig[row, col]; xticks = 0:90:360, titlesize = 12,
+            title = "$ph · $(compLabel(comp)) · $(pole) source",
+            xlabel = row == length(SEISMO_POLES) ? "station angle φ (°)" : "",
+            ylabel = col == 1 ? string(fname) : "")
+        for m in models
+            haskey(feat, (pole, comp, m, ph)) || continue
+            A = feat[(pole, comp, m, ph)]
+            ok = findall(j -> isfinite(A[j, k, 1]), axes(A, 1))
+            isempty(ok) && continue
+            μ = [A[j, k, 1] for j in ok]
+            s = [std(filter(isfinite, A[j, k, 2:end])) for j in ok]
+            c = modelColor(m)
+            band!(ax, φs[ok], μ .- s, μ .+ s; color = (c, 0.2))
+            scatter!(ax, φs[ok], μ; color = c, markersize = 4, label = shortName(m))
+        end
+        row == 1 && col == 1 && axislegend(ax; position = :rt, labelsize = 10)
+        xlims!(ax, 0, 360)
+    end
+    Label(fig[0, :], "$(fname) in the PREM phase windows (noise-free, band ±1σ over the noise realisations): " *
+        "PREM black, sb11 red, sb21 blue", fontsize = 16)
+    return fig
+end
+
+"Distribution over stations of one feature, per phase and model (box-like summary)."
+function featureDistributionFigure(feat, models, fname, phases)
+    k = findfirst(==(fname), collect(FEATURE_NAMES))
+    fig = Figure(size = (180 * length(phases) + 200, 300 * length(SEISMO_POLES) + 80))
+    for (row, pole) in enumerate(SEISMO_POLES)
+        ax = Axis(fig[row, 1]; xticks = (1:length(phases), phases), ylabel = "$(fname), $(pole) source")
+        for (mi, m) in enumerate(models), (i, ph) in enumerate(phases)
+            key = (pole, phaseComponent(ph), m, ph)
+            haskey(feat, key) || continue
+            v = filter(isfinite, feat[key][:, k, 1])
+            isempty(v) && continue
+            x = fill(i + 0.25 * (mi - 2), length(v))
+            boxplot!(ax, x, v; width = 0.22, color = (modelColor(m), 0.6), show_outliers = false,
+                label = (i == 1 ? shortName(m) : nothing))
+        end
+        row == 1 && axislegend(ax; position = :rt, labelsize = 10, unique = true)
+    end
+    Label(fig[0, :], "$(fname): distribution over stations (noise-free), PREM black, sb11 red, sb21 blue", fontsize = 16)
     return fig
 end

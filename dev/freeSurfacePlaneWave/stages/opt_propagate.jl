@@ -60,6 +60,22 @@ function propagateFreePlaneWave(prepared, Nt, dt; output_stride=1, blowup_limit=
         knownInputs = vcat(vec(knownField), vec(knownForce))
         prepared.b_fun!(b, knownInputs)
         unknownField .= reshape(factor \ b, prepared.NpointsSpace, prepared.NField)
+        # Pin the two lateral (x) edge columns to the exact analytical
+        # solution at the time just solved for -- same reasoning as
+        # fd_propagate.jl's pinLateralEdgesFD!: nothing here ever imposes a
+        # genuine lateral boundary condition (no periodic BC, no x-Cerjan,
+        # by the original "nothing propagates laterally" design), so
+        # whatever the solver's own edge treatment amounts to otherwise
+        # leaks a spurious x-gradient inward once the IC is nonzero
+        # everywhere. This keeps the edges exact regardless of domain
+        # width, and only ever overwrites the two edge columns -- it
+        # cannot mask or soften an interior/free-surface blowup.
+        currentTime = step * dt
+        for ix in (1, prepared.spaceShape[1]), iz in 1:prepared.spaceShape[2]
+            edgeIdx = linear[CartesianIndex(ix, iz)]
+            unknownField[edgeIdx, 1] = 0.0
+            unknownField[edgeIdx, 2] = planeWaveRowOPT(iz, currentTime)
+        end
         amplitude = maximum(abs, unknownField)
         if !isfinite(amplitude) || amplitude > blowup_limit
             @warn "stopping propagation" solver_name step amplitude blowup_limit

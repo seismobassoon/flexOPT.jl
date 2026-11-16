@@ -69,9 +69,29 @@ Windows: the PREM phase windows (−25/+45 s) and fixed 200-s windows over the r
 Features of the ground-velocity segment: ln rms (variance), ln peak, spectral centroid
 and bandwidth (mHz), energy duration t90−t10, energy-centroid time, kurtosis,
 cross-correlation delay and decorrelation against noise-free PREM, ln H/V.
+Coda after each phase window (150 s): number of distinct later arrivals (envelope maxima
+> 20 % of the phase peak, ≥ 15 s apart), ln(coda / phase energy), envelope decay rate.
+Phase pairs at the same station (`FEATURES.pairs`, e.g. ScS/S, PcP/P, SKS/S, SS/S):
+ln amplitude ratio and differential cross-correlation delay (source and site cancel).
 Each model trace gets 20 realisations of band-limited Gaussian noise (5 % of the
 median PREM trace rms, one level per source and component); per station z = Δ(mean)/sqrt(var₁ + var₂); score = number of
 stations with |z| > 2. Outputs `outputs/features/`: `feature_scores.csv` (ranked),
 `features_scores_<pole>.png` (feature × window map), `features_00_ranking.png`,
 `features_01_top.png` (best 12 vs φ), `feature_values.jld2`. Settings: `FEATURES` in
 `stages/config.jl`.
+
+## Neutrinos: 4 surface detectors
+
+```sh
+julia --project=. -t auto dev/new_Paul_models/run.jl neutrinos
+```
+
+Detectors 2.5 km deep at the source angles (north, east, south, west), atmospheric
+νe/νμ/ν̄ (Daemonflux, CC cross sections, perfect detector 20 Mt × 1 yr), both sides
+of each detector (rays towards decreasing / increasing φ). nₑ = ρ Yₑ: PREM (Z/A 0.466
+core, 0.4955 mantle) and PREM × (1 + δlnρ)(1 + δlnYₑ) for sb11/sb21, δlnYₑ from bs with
+Paul's end-members. creationPaths shoots only from the north pole, so the nₑ field is
+rotated / mirrored for each detector side (src/ untouched). Outputs `outputs/neutrinos/`:
+`nu_00_maps` (δln nₑ, detectors, rays), `nu_01_bars_e|mu` (rms δN/N vs PREM and
+√Δχ²(sb11 vs sb21) per detector, per zenith class × energy band), `nu_02_<det>_e|mu`
+(δN(E, cosθ) maps), `neutrino_table.csv`. Cache: `nu_*` in data/dev/new_Paul_models.

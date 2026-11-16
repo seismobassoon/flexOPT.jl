@@ -1,10 +1,10 @@
 # dev/freeSurfacePlaneWave/codeVersions.jl
 CODE_VERSION = Dict(
-    "opt" => "v2-2026-11-15-planewave-ic",  # recipes + operators + OPT3/OPT5
-        # :direct propagation from an exact plane-wave INITIAL CONDITION,
-        # zero forcing throughout (replaces the old sheet-source/Green's-
-        # function-forcing v1)
-    "fd"  => "v2-2026-11-15-planewave-ic",  # explicit elasticWave2D FD3,
-        # same plane-wave-IC, zero-forcing replacement of v1
+    "opt" => "v3-2026-11-15-pin-lateral-edges",  # v2 + pinning the two x-
+        # edge columns to the exact analytical solution every step (v2
+        # left them frozen at their t=0 IC snapshot, since nothing ever
+        # updates them otherwise -- harmless when the field starts/stays
+        # at rest, wrong once the IC is nonzero everywhere)
+    "fd"  => "v3-2026-11-15-pin-lateral-edges",  # same fix, FD3 side
 )
 PLANEWAVE_CACHE_DIR = joinpath("dev", "freeSurfacePlaneWave")

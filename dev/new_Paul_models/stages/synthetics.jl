@@ -91,11 +91,13 @@ end
 SEISMO_RAY_PREM = readDSMModel(joinpath(flexopt_root, "dataInput", "model", "earth", "PREM.psv.model"))
 SEISMO_DEPTH_KM = S.sourceDepth / 1e3
 DEV_STEP[] = "synthetics"
-paulSave(seismoModelFigure(seismoAnomalies, seismoDiskGrid, seismoSources, planetRadius, cmbRadius), "models")
-for pole in SEISMO_POLES, comp in (:vert, :horiz)
-    paulSave(anrSectionFigure(seismoResults, SEISMO_MODEL_NAMES, pole, comp), "section_$(pole)_$(comp)")
-    paulSave(recordSectionFigure(seismoResults, SEISMO_MODEL_NAMES, pole, comp), "section_overlay_$(pole)_$(comp)")
-end
-for pole in SEISMO_POLES
-    paulSave(snapshotFigure(seismoResults, SEISMO_MODEL_NAMES, pole, seismoDiskGrid), "snapshots_$(pole)")
+if !@isdefined(PAUL_SYNTH_FIGURES) || PAUL_SYNTH_FIGURES
+    paulSave(seismoModelFigure(seismoAnomalies, seismoDiskGrid, seismoSources, planetRadius, cmbRadius), "models")
+    for pole in SEISMO_POLES, comp in (:vert, :horiz)
+        paulSave(anrSectionFigure(seismoResults, SEISMO_MODEL_NAMES, pole, comp), "section_$(pole)_$(comp)")
+        paulSave(recordSectionFigure(seismoResults, SEISMO_MODEL_NAMES, pole, comp), "section_overlay_$(pole)_$(comp)")
+    end
+    for pole in SEISMO_POLES
+        paulSave(snapshotFigure(seismoResults, SEISMO_MODEL_NAMES, pole, seismoDiskGrid), "snapshots_$(pole)")
+    end
 end

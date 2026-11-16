@@ -16,7 +16,8 @@ featureWins = featureWindows(seismoTable, seismoΔgrid, featureCfg)
 featureModels = SEISMO_MODEL_NAMES[2:end]
 length(featureModels) == 2 || error("the feature step compares exactly two models")
 println("feature windows: ", join([w.label for w in featureWins], ", "))
-@time "features" featureValues = computeFeatures(seismoResults, featureModels, seismoReceivers.φ,
+# features for PREM too (shown in the figures); the ranking compares featureModels only
+@time "features" featureValues = computeFeatures(seismoResults, SEISMO_MODEL_NAMES, seismoReceivers.φ,
     featureWins, featureCfg)
 featureRows = scoreFeatures(featureValues, featureModels, featureWins, featureCfg)
 
@@ -45,4 +46,10 @@ for pole in SEISMO_POLES
     paulSave(featureScoreFigure(featureRows, featureWins, pole, featureCfg), "features_scores_$(pole)")
 end
 paulSave(featureRankingFigure(featureRows), "features_00_ranking")
-paulSave(topFeaturesFigure(featureRows, featureValues, featureModels, seismoReceivers.φ), "features_01_top")
+paulSave(topFeaturesFigure(featureRows, featureValues, SEISMO_MODEL_NAMES, seismoReceivers.φ), "features_01_top")
+for fname in featureCfg.showFeatures
+    paulSave(featureByPhaseFigure(featureValues, SEISMO_MODEL_NAMES, fname, featureCfg.showPhases,
+        seismoReceivers.φ), "features_02_$(fname)_vs_phi")
+    paulSave(featureDistributionFigure(featureValues, SEISMO_MODEL_NAMES, fname, featureCfg.phases),
+        "features_03_$(fname)_distribution")
+end

@@ -10,6 +10,7 @@
 #   julia --project=. -t auto dev/new_Paul_models/run.jl synthetics         # FD3: PREM, sb11, sb21 x N/S pole
 #   julia --project=. -t auto dev/new_Paul_models/run.jl phases             # phase windows (after synthetics)
 #   julia --project=. -t auto dev/new_Paul_models/run.jl features           # discriminating features sb11 vs sb21
+#   julia --project=. -t auto dev/new_Paul_models/run.jl neutrinos          # 4 surface ν detectors: Pνν, events, Δχ²
 #   julia --project=. -t auto dev/new_Paul_models/run.jl synthetics --redo=fd3   # recompute the runs
 # From a REPL (fastest):
 #   include("dev/new_Paul_models/run.jl")
@@ -31,7 +32,7 @@ paulArgs = let a = collect(String, @isdefined(DEV_ARGS) ? DEV_ARGS : ARGS)
     k = findfirst(x -> startswith(x, "#"), a)
     isnothing(k) ? a : a[1:k-1]
 end
-DEV = parseDevArgs(paulArgs; steps = ["figures", "synthetics", "phases", "features"], defaultStep = "figures",
+DEV = parseDevArgs(paulArgs; steps = ["figures", "synthetics", "phases", "features", "neutrinos"], defaultStep = "figures",
     cases = paulModels, defaultCases = paulModels)
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 println("Paul models dev run: ", DEV)
@@ -45,12 +46,27 @@ include(joinpath(PAUL_STAGES, "config.jl"))
 PAUL_FIGURE_MIRROR = get(ENV, "PAUL_FIGURE_MIRROR",
     joinpath(PAUL_MODELS_DIR, "tell_me_if_you_dont_want_these_files_that_could_take_some_space"))
 "devSave + copy to PAUL_FIGURE_MIRROR/<step>/"
-function paulSave(fig, name)
-    path = devSave(fig, name)
+function paulSave(fig, name; attempts = 3)
+    path = nothing
+    for k in 1:attempts
+        try
+            path = devSave(fig, name)
+            break
+        catch err
+            # e.g. "Operation timed out" on close() when the folder is synced / busy
+            @warn "saving $name failed (attempt $k/$attempts)" exception = err
+            k < attempts && sleep(5k)
+        end
+    end
+    path === nothing && (@warn "figure $name NOT saved"; return nothing)
     if !isempty(PAUL_FIGURE_MIRROR)
-        dir = joinpath(PAUL_FIGURE_MIRROR, DEV_STEP[])
-        mkpath(dir)
-        cp(path, joinpath(dir, basename(path)); force = true)
+        try
+            dir = joinpath(PAUL_FIGURE_MIRROR, DEV_STEP[])
+            mkpath(dir)
+            cp(path, joinpath(dir, basename(path)); force = true)
+        catch err
+            @warn "copy of $name to the mirror failed" exception = err
+        end
     end
     return path
 end
@@ -68,9 +84,12 @@ for step in DEV.steps
         include(joinpath(@__DIR__, "lib", "paulSeismo.jl"))
         include(joinpath(@__DIR__, "lib", "paulSeismoFigures.jl"))
         include(joinpath(@__DIR__, "lib", "paulFeatures.jl"))
+        include(joinpath(@__DIR__, "lib", "paulNeutrino.jl"))
         println("\n================ Paul models: ", step, " ================")
+        global PAUL_SYNTH_FIGURES = step == "synthetics"   # phases/features reuse the runs without redrawing
         step == "synthetics" && @time "synthetics" include(joinpath(PAUL_STAGES, "synthetics.jl"))
         step == "phases" && @time "phases" include(joinpath(PAUL_STAGES, "phases.jl"))
         step == "features" && @time "features" include(joinpath(PAUL_STAGES, "features.jl"))
+        step == "neutrinos" && @time "neutrinos" include(joinpath(PAUL_STAGES, "neutrinos.jl"))
     end
 end
