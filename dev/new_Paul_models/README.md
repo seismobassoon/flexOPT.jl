@@ -95,3 +95,8 @@ rotated / mirrored for each detector side (src/ untouched). Outputs `outputs/neu
 `nu_00_maps` (δln nₑ, detectors, rays), `nu_01_bars_e|mu` (rms δN/N vs PREM and
 √Δχ²(sb11 vs sb21) per detector, per zenith class × energy band), `nu_02_<det>_e|mu`
 (δN(E, cosθ) maps), `neutrino_table.csv`. Cache: `nu_*` in data/dev/new_Paul_models.
+
+Sparse bins (as the ANR figure: Δlog₁₀E = 0.1, Δcosθ = 0.05, 20 × 20) at `NU.coarse.exposureMtYr`
+(1 Mt·yr): post-processing of the cached runs, `nu_03_bars_sparse_e|mu` (δN/N and √Δχ² per detector
+on the sparse bins) and `nu_04_sparse_<det>_e|mu` (δN maps with N_PREM contours, core lines, and
+(sb11 − sb21)/√N in σ per bin), `neutrino_table_sparse.csv`.

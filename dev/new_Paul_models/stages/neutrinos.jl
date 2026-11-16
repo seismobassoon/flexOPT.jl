@@ -65,3 +65,27 @@ for ch in ("νe", "νμ")
         paulSave(neutrinoDetectorFigure(nuResults, SEISMO_MODEL_NAMES, det, NU_SIDES, ch), "nu_02_$(det)_$(tag)")
     end
 end
+
+# ---- sparse bins (ANR style) at NU.coarse.exposureMtYr: tables, bars, maps
+nuCoarse = coarseResults(nuResults, NU)
+nuCfgCoarse = merge(NU, (massKg = NU.coarse.exposureMtYr * 1e9, years = 1.0))
+nuRowsC = neutrinoTable(nuCoarse, SEISMO_MODEL_NAMES, SEISMO_POLES, NU_SIDES, NU, planetRadius, cmbRadius, icbRadius)
+let file = joinpath(DEV_OUTPUT_DIR[], "neutrinos", "neutrino_table_sparse.csv")
+    open(file, "w") do io
+        println(io, "# sparse bins dlog10E=$(NU.coarse.dlog10E) dcos=$(NU.coarse.dcos), exposure $(NU.coarse.exposureMtYr) Mt yr")
+        println(io, "detector,side,channel,class,band_GeV,N_PREM,N_sb11,N_sb21,dNN_sb11,dNN_sb21,chi2_sb11_vs_sb21,chi2_sb11_vs_PREM,chi2_sb21_vs_PREM")
+        for r in nuRowsC
+            @printf(io, "%s,%s,%s,%s,%g-%g,%.4g,%.4g,%.4g,%.5f,%.5f,%.4g,%.4g,%.4g\n", r.detector, r.side > 0 ? "+" : "-",
+                r.channel, r.class, r.band[1], r.band[2], r.N_PREM, r.N_1, r.N_2, r.dNN_1, r.dNN_2, r.chi2_12, r.chi2_1P, r.chi2_2P)
+        end
+    end
+    println("sparse-bin table -> ", file)
+end
+for ch in ("νe", "νμ")
+    tag = ch == "νe" ? "e" : "mu"
+    paulSave(neutrinoBarFigure(nuRowsC, ch, SEISMO_MODEL_NAMES, SEISMO_POLES, nuCfgCoarse), "nu_03_bars_sparse_$(tag)")
+    for det in SEISMO_POLES
+        paulSave(neutrinoCoarseFigure(nuCoarse, SEISMO_MODEL_NAMES, det, NU_SIDES, ch, NU, planetRadius, cmbRadius),
+            "nu_04_sparse_$(det)_$(tag)")
+    end
+end

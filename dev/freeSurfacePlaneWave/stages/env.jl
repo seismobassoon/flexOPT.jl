@@ -10,6 +10,8 @@ backend isa KernelAbstractions.CPU && @warn("No GPU backend is available; OPT re
 planewaveLoadEnv && !@isdefined(flexOPT) && include(joinpath(flexopt_root, "src", "flexOPT.jl"))
 planewaveLoadEnv && !@isdefined(elasticWave2D) && include(joinpath(flexopt_root, "src", "elasticWave2D.jl"))
 using .flexOPT, .elasticWave2D
+planewaveLoadEnv && !@isdefined(specfemBenchmark) && include(joinpath(flexopt_root, "src", "specfemBenchmark.jl"))
+using .specfemBenchmark
 using CairoMakie, Statistics, LinearAlgebra, SparseArrays, JLD2
 CairoMakie.activate!(type="png")
 PLANEWAVE_ENV = true

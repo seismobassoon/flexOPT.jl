@@ -240,3 +240,65 @@ function neutrinoDetectorFigure(res, models, det, sides, channel)
     end
     return fig
 end
+
+# ---- sparse (ANR-style) bins ---------------------------------------------------
+"""
+    coarseResults(res, cfg) -> Dict like `res` with events summed into the coarse
+    (E, cosθ) bins of cfg.coarse (Δlog₁₀E, Δcosθ) and scaled to cfg.coarse.exposureMtYr.
+Also stores the bin edges ("Eedges", "cedges").
+"""
+function coarseResults(res, cfg)
+    out = Dict{Tuple{String,Symbol,Int},Any}()
+    scale = cfg.coarse.exposureMtYr / (cfg.massKg / 1e9 * cfg.years)
+    for (k, r) in res
+        E, cθ = r["energies"], r["cosθ"]
+        le = log10.(E); dle = le[2] - le[1]; hc = cθ[2] - cθ[1]
+        fe = max(1, round(Int, cfg.coarse.dlog10E / dle)); fc = max(1, round(Int, cfg.coarse.dcos / hc))
+        nE, nC = length(E) ÷ fe, length(cθ) ÷ fc
+        coarse(N) = [scale * sum(@view N[(i-1)*fe+1:i*fe, (j-1)*fc+1:j*fc]) for i in 1:nE, j in 1:nC]
+        Eedges = 10 .^ vcat(le[1:fe:fe*nE] .- dle / 2, le[fe*nE] + dle / 2)
+        cedges = vcat(cθ[1:fc:fc*nC] .- hc / 2, cθ[fc*nC] + hc / 2)
+        out[k] = Dict{String,Any}("Ne" => coarse(r["Ne"]), "Nmu" => coarse(r["Nmu"]),
+            "energies" => sqrt.(Eedges[1:end-1] .* Eedges[2:end]), "cosθ" => (cedges[1:end-1] .+ cedges[2:end]) ./ 2,
+            "Eedges" => Eedges, "cedges" => cedges)
+    end
+    return out
+end
+
+"""
+ANR-style δN maps on the sparse bins for one detector: rows = sides; columns =
+sb11 − PREM, sb21 − PREM, sb11 − sb21 (events / bin at the coarse exposure, grey
+contours = N_PREM), and (sb11 − sb21)/√N̄ (σ per bin). Dashed: core / inner core.
+"""
+function neutrinoCoarseFigure(resC, models, det, sides, channel, cfg, planetRadius, cmbRadius; icb = 1_221_500.0)
+    key = channel == "νe" ? "Ne" : "Nmu"
+    fig = Figure(size = (1900, 430 * length(sides) + 70))
+    for (row, side) in enumerate(sides)
+        r0 = resC[(models[1], det, side)]
+        Ee, ce, Ec, cc = r0["Eedges"], r0["cedges"], r0["energies"], r0["cosθ"]
+        N0, N1, N2 = r0[key], resC[(models[2], det, side)][key], resC[(models[3], det, side)][key]
+        sig = (N1 .- N2) ./ sqrt.(max.(0.5 .* (N1 .+ N2), eps()))
+        panels = ((N1 .- N0, "$(shortName(models[2])) − PREM", "events / bin", :balance),
+            (N2 .- N0, "$(shortName(models[3])) − PREM", "events / bin", :balance),
+            (N1 .- N2, "$(shortName(models[2])) − $(shortName(models[3]))", "events / bin", :balance),
+            (sig, "($(shortName(models[2])) − $(shortName(models[3])))/√N", "σ per bin", :PuOr))
+        for (col, (D, t, lab, cmap)) in enumerate(panels)
+            ax = Axis(fig[row, col][1, 1]; xscale = log10, xlabel = "E (GeV)",
+                ylabel = col == 1 ? "cos θ (side $(side > 0 ? "+" : "−"))" : "", title = "$det, $channel CC: $t",
+                titlesize = 13)
+            lim = col == 4 ? max(3.0, maximum(abs, D)) : max(maximum(abs, D), eps())
+            hm = heatmap!(ax, Ee, ce, D; colormap = cmap, colorrange = (-lim, lim))
+            levels = filter(>(0), [quantile(vec(N0), q) for q in (0.5, 0.8, 0.95)])
+            isempty(levels) || contour!(ax, Ec, cc, N0; levels = levels, color = (:gray30, 0.8), linewidth = 0.6)
+            for (rr, name) in ((cmbRadius, "core"), (icb, "inner core"))
+                cz = -sqrt(1 - (rr / planetRadius)^2)
+                hlines!(ax, [cz]; color = :gray30, linestyle = :dash, linewidth = 0.6)
+                col == 1 && text!(ax, Ee[1] * 1.05, cz + 0.01; text = name, fontsize = 9, color = :gray30)
+            end
+            Colorbar(fig[row, col][1, 2], hm; label = lab, height = Relative(0.7))
+        end
+    end
+    Label(fig[0, :], @sprintf("Sparse bins Δlog₁₀E = %.2f, Δcosθ = %.2f, %.1f Mt·yr perfect detector (Daemonflux, CC, νμ→νe included)",
+        cfg.coarse.dlog10E, cfg.coarse.dcos, cfg.coarse.exposureMtYr), fontsize = 15)
+    return fig
+end

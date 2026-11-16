@@ -68,3 +68,15 @@ FEATURES = (
     showPhases = ["P", "PcP", "PP", "S", "ScS", "SKS", "SS"],
     pairs = [("ScS", "S"), ("PcP", "P"), ("SKS", "S"), ("SS", "S"), ("PP", "P"), ("sS", "S"), ("pP", "P"), ("PKIKP", "PKP")],
 )
+
+# ---- neutrinos (step `neutrinos`): detectors at the surface at SEISMO_SOURCE_ANGLES
+NU = (
+    binning = (energies = logrange(1.0, 100.0, 200), cosθgrid = range(-1.0, 0.0, 400)),  # = notebook (cached flux)
+    Δbaseline = 50e3,          # m, path segments
+    detectorDepth = 2.5e3,     # m
+    massKg = 20.0e9,           # perfect detector, 20 Mt
+    years = 1.0,               # Δχ² scales with mass × years
+    yeCore = 0.466, yeMantle = 0.4955,        # PREM Z/A (core, mantle)
+    d670 = 670e3,              # zenith classes: upper / lower mantle / outer / inner core
+    energyBands = [(1.0, 3.0), (3.0, 8.0), (8.0, 20.0), (20.0, 100.0)],   # GeV
+)

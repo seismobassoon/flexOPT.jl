@@ -98,16 +98,26 @@ end
 optSteps = ceil(Int, duration / dtOPT)
 optOutputStride = max(1, round(Int, outputSampling / dtOPT))
 
+# NOTE (2026-11-16, on request): these used to be hard
+# @assert !stopped_early checks -- the "normal" (actual free-surface) step's
+# OPT3 closure reliably hits blowup_limit around step ~880/1018 (the
+# already-established :additive elasticTractionFree2D closure bug;
+# see this benchmark's own earlier findings), which used to crash the
+# whole run before FD3/SPECFEM2D/analytical ever got compared. Downgraded
+# to a @warn so compare.jl still renders analytical/FD3/OPT3/OPT5/
+# SPECFEM2D together for "normal" -- OPT3's truncated, divergent trace
+# is itself the point being shown, not something to hide. "nosurface"
+# has never hit this (no free-surface closure exercised there at all).
 propagationOPT = propagateFreePlaneWave(preparedOPT, optSteps, dtOPT;
     output_stride=optOutputStride, blowup_limit=1e8, solver_name="OPT3")
-@assert !propagationOPT.stopped_early
+propagationOPT.stopped_early && @warn "OPT3 stopped early (known free-surface-closure blowup) -- its trace is truncated/divergent in the comparison figure" step=length(propagationOPT.times)
 uxOPT = propagationOPT.history[:, :, 1, :]
 uzOPT = propagationOPT.history[:, :, 2, :]
 optTimes = propagationOPT.times
 
 propagationOPT5 = propagateFreePlaneWave(preparedOPT5, optSteps, dtOPT;
     output_stride=optOutputStride, blowup_limit=1e8, solver_name="OPT5")
-@assert !propagationOPT5.stopped_early
+propagationOPT5.stopped_early && @warn "OPT5 stopped early (known free-surface-closure blowup) -- its trace is truncated/divergent in the comparison figure" step=length(propagationOPT5.times)
 uxOPT5 = propagationOPT5.history[:, :, 1, :]
 uzOPT5 = propagationOPT5.history[:, :, 2, :]
 opt5Times = propagationOPT5.times

@@ -76,6 +76,7 @@ for step in DEV.steps
         include(joinpath(PLANEWAVE_STAGES, "config.jl"))
         include(joinpath(PLANEWAVE_STAGES, "opt.jl"))
         include(joinpath(PLANEWAVE_STAGES, "fd.jl"))
+        include(joinpath(PLANEWAVE_STAGES, "specfem.jl"))
         include(joinpath(PLANEWAVE_STAGES, "analytical.jl"))
         include(joinpath(PLANEWAVE_STAGES, "compare.jl"))
     end

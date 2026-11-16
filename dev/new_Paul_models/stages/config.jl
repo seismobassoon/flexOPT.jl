@@ -79,4 +79,5 @@ NU = (
     yeCore = 0.466, yeMantle = 0.4955,        # PREM Z/A (core, mantle)
     d670 = 670e3,              # zenith classes: upper / lower mantle / outer / inner core
     energyBands = [(1.0, 3.0), (3.0, 8.0), (8.0, 20.0), (20.0, 100.0)],   # GeV
+    coarse = (dlog10E = 0.1, dcos = 0.05, exposureMtYr = 1.0),           # sparse bins as in the ANR figure
 )
