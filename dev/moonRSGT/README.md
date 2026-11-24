@@ -48,14 +48,15 @@ scp OUTPUT_ND.zip stella:/gpfs/scratch/nobuaki/moonRSGT/       # from your Mac
 cd /gpfs/scratch/nobuaki/moonRSGT && unzip OUTPUT_ND.zip && rm -rf __MACOSX
 mkdir -p /gpfs/scratch/nobuaki/moonRSGT/logs
 
-# 2. in the repository, on a compute node (srun) rather than the login node
+# 2. prepare + check on a compute node (S-CAPAD/DANTE rule: never run julia on stella*)
 cd /gpfs/users/nobuaki/github/flexOPT.jl
-julia --project=. dev/moonRSGT/run.jl prepare      # summary of the 1000 models, storage, OPT3 recipes cached
-julia --project=. dev/moonRSGT/run.jl check        # model 1: catalogue + comparison with exact synthetics
+sbatch dev/moonRSGT/slurm/prepare_check.sbatch     # logs in /gpfs/scratch/nobuaki/moonRSGT/logs/
+#   or interactively:  srun -p ncpushort -n1 -c1 --mem=8G -t 2:00:00 --pty bash
+#                      julia --project=. dev/moonRSGT/run.jl prepare ; julia --project=. dev/moonRSGT/run.jl check
 
-# 3. everything (Slurm array, 10 models per task; re-submitting skips finished models)
+# 3. everything (Slurm array on ncpu, 10 models per task; re-submitting skips finished models)
 sbatch dev/moonRSGT/slurm/build_catalogue.sbatch
-julia --project=. dev/moonRSGT/run.jl info         # what is still missing
+srun -p ncpushort -n1 -c1 --mem=4G -t 0:30:00 julia --project=. dev/moonRSGT/run.jl info   # what is missing
 ```
 
 `check` compares, for 3 sources (on the depth grid at 300 km, off-grid at
