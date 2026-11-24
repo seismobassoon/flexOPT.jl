@@ -411,13 +411,75 @@ specfemStationNames = ["S0016", "S0022", "S0017", "S0023", "S0018"]  # x=-30,-20
 specfemTimeShift = 1.2 / sourceFrequency   # external-STF convention, see src/specfemBenchmark.jl
 specfemFiles = find_specfem2d_traces(specfemOutput; component=:z, seismotype=2, network="FX", stations=specfemStationNames)
 @assert length(specfemFiles) == 5
-specfemRawTracesZ = [read_specfem2d_trace(file; time_shift=specfemTimeShift) for file in specfemFiles]
+# find_specfem2d_traces (src/specfemBenchmark.jl) always sorts its RETURN by
+# station-name field, regardless of the order `stations` was given in -- so
+# the 5 paths above come back alphabetically (S0016,S0017,S0018,S0022,S0023,
+# i.e. x=-30,-10,10,-20,0 km), NOT in specfemStationNames/receiverX order
+# (x=-30,-20,-10,0,10 km). Re-order explicitly rather than assume order
+# preservation (this was wrong in an earlier version of this script and
+# silently scrambled every station past the first).
+specfemFilesByStation = Dict(split(basename(path), '.')[2] => path for path in specfemFiles)
+orderedSpecfemFiles = [specfemFilesByStation[name] for name in specfemStationNames]
+specfemRawTracesZ = [read_specfem2d_trace(file; time_shift=specfemTimeShift) for file in orderedSpecfemFiles]
 function integrate_velocity_trace(trace)
     displacement = zeros(Float64, length(trace.values))
     displacement[2:end] .= cumsum(((trace.values[1:end-1] .+ trace.values[2:end]) ./ 2) .* diff(trace.time))
     (time=Float64.(trace.time), values=displacement)
 end
 specfemWaveformsZ = integrate_velocity_trace.(specfemRawTracesZ)
+
+# ======================================= SeismicWavePC.jl (isolated env, read-only)
+# Produced by dev/freeSurfacePointSource/seismicWavePCEnv/runSeismicWavePC.jl in
+# its OWN isolated Julia environment (see that script's header: SeismicWavePC.jl
+# pulls in a GeophysicalModelGenerator version that conflicts with flexOPT's own
+# pinned Makie/GLMakie, so it cannot live in this shared environment). The saved
+# JLD2 holds only plain NamedTuples of Float64 vectors, so it loads fine here
+# without SeismicWavePC itself being installed in this environment.
+seismicWavePCPath = joinpath(@__DIR__, "outputs", "seismicWavePC", "seismicwavepc_traces.jld2")
+haveSeismicWavePC = isfile(seismicWavePCPath)
+if haveSeismicWavePC
+    seismicWavePCRawTraces = load(seismicWavePCPath, "traces")
+    @assert length(seismicWavePCRawTraces) == length(receiverX)
+    # Two conventions do not translate from this benchmark's other solvers
+    # (see application/forBoris/README.md and runSeismicWavePC.jl's header):
+    # force-amplitude normalization, and the Ricker source-time-function's
+    # exact time-centering. Rather than guess SeismicWavePC's internal STF
+    # centering formula, find the time lag that best cross-correlates its
+    # trace at the station directly above the source against the SPECFEM2D
+    # reference there, and apply that SAME lag (a pure STF-convention offset,
+    # not a propagation effect, so it must be station-independent) everywhere.
+    alignmentStation = something(findfirst(==(sourcePosition.x), receiverX), cld(length(receiverX), 2))
+    function best_alignment_lag(reference, candidate; max_lag=4.0, step=0.02)
+        best_lag, best_corr = 0.0, -Inf
+        for lag in -max_lag:step:max_lag
+            shifted = (time=candidate.time .+ lag, values=candidate.values)
+            corr = try
+                waveform_metrics(reference, shifted; samples=501).correlation
+            catch
+                -Inf
+            end
+            corr > best_corr && ((best_corr, best_lag) = (corr, lag))
+        end
+        (lag=best_lag, correlation=best_corr)
+    end
+    seismicWavePCAlignment = best_alignment_lag(
+        specfemWaveformsZ[alignmentStation], seismicWavePCRawTraces[alignmentStation])
+    @show alignmentStation seismicWavePCAlignment
+    # Per-station amplitude match to the SPECFEM2D peak at that station (same
+    # spirit as the forBoris README's suggested comparison strategy: rescale
+    # by the ratio of peak amplitudes so relative_error/relative_rmse mean
+    # something despite SeismicWavePC's own, non-physical M0 bookkeeping;
+    # correlation is scale-invariant and unaffected either way).
+    seismicWavePCDisplacementZ = map(eachindex(receiverX)) do station
+        raw = seismicWavePCRawTraces[station]
+        reference = specfemWaveformsZ[station]
+        peakReference = max(maximum(abs, reference.values), eps(Float64))
+        peakCandidate = max(maximum(abs, raw.values), eps(Float64))
+        (time=raw.time .+ seismicWavePCAlignment.lag, values=raw.values .* (peakReference / peakCandidate))
+    end
+else
+    @warn("SeismicWavePC traces not found at $seismicWavePCPath -- run seismicWavePCEnv/runSeismicWavePC.jl first; continuing without it")
+end
 
 # ================================================ cells 20/21 (waveform fit)
 function waveform_metrics_compact(reference, candidate)
@@ -426,10 +488,11 @@ function waveform_metrics_compact(reference, candidate)
         relative_rmse=full.relative_rmse)
 end
 function solver_traces_for_station(station)
-    (FD3=(time=fdDisplacementZ.time, values=fdDisplacementZ.values[:, station]),
+    base = (FD3=(time=fdDisplacementZ.time, values=fdDisplacementZ.values[:, station]),
         convFD3=(time=convFDDisplacementZ.time, values=convFDDisplacementZ.values[:, station]),
         OPT3=(time=opt3DisplacementZ.time, values=opt3DisplacementZ.values[:, station]),
         OPT5=(time=opt5DisplacementZ.time, values=opt5DisplacementZ.values[:, station]))
+    haveSeismicWavePC ? merge(base, (SeismicWavePC=seismicWavePCDisplacementZ[station],)) : base
 end
 stationErrorMetrics = map(eachindex(receiverX)) do station
     reference = specfemWaveformsZ[station]
@@ -454,21 +517,36 @@ for station in eachindex(receiverX)
     traces = merge(solver_traces_for_station(station), (SPECFEM2D=specfemWaveformsZ[station],))
     for (name, trace) in pairs(traces)
         scale = max(maximum(abs, trace.values), eps(Float64))
-        color = name === :SPECFEM2D ? :black : nothing
-        linewidth = name === :SPECFEM2D ? 2 : 1
-        lines!(axis, trace.time, trace.values ./ scale; label=string(name), color, linewidth)
+        if name === :SPECFEM2D
+            lines!(axis, trace.time, trace.values ./ scale; label=string(name), color=:black, linewidth=2)
+        elseif name === :SeismicWavePC
+            lines!(axis, trace.time, trace.values ./ scale; label=string(name), linestyle=:dot, linewidth=2)
+        else
+            lines!(axis, trace.time, trace.values ./ scale; label=string(name))
+        end
     end
     station == 1 && axislegend(axis; position=:rb, nbanks=3)
 end
-Label(waveformFigure[0, 1], "Point force, flat free surface, u_z (normalized): FD3 / convFD3 / OPT3 / OPT5 / SPECFEM2D"; fontsize=14)
+Label(waveformFigure[0, 1], "Point force, flat free surface, u_z (normalized): FD3 / convFD3 / OPT3 / OPT5 / SPECFEM2D" *
+    (haveSeismicWavePC ? " / SeismicWavePC" : ""); fontsize=14)
 
 # ---------------------------------------------------------------- outputs
 outdir = joinpath(DEV_OUTPUT_DIR[], DEV_STEP[])
 mkpath(outdir)
-jldsave(joinpath(outdir, "all_solvers_traces.jld2");
-    vp0, vs0, rho0, sourcePosition, sourceForce, sourceFrequency, sourceDelay,
-    dx, dxOPT, dtOPT, receiverX, receiverZ,
-    fdDisplacementZ, convFDDisplacementZ, opt3DisplacementZ, opt5DisplacementZ, specfemWaveformsZ,
-    stationErrorMetrics, globalErrorMetrics)
+if haveSeismicWavePC
+    jldsave(joinpath(outdir, "all_solvers_traces.jld2");
+        vp0, vs0, rho0, sourcePosition, sourceForce, sourceFrequency, sourceDelay,
+        dx, dxOPT, dtOPT, receiverX, receiverZ,
+        fdDisplacementZ, convFDDisplacementZ, opt3DisplacementZ, opt5DisplacementZ, specfemWaveformsZ,
+        haveSeismicWavePC, seismicWavePCDisplacementZ, seismicWavePCAlignment,
+        stationErrorMetrics, globalErrorMetrics)
+else
+    jldsave(joinpath(outdir, "all_solvers_traces.jld2");
+        vp0, vs0, rho0, sourcePosition, sourceForce, sourceFrequency, sourceDelay,
+        dx, dxOPT, dtOPT, receiverX, receiverZ,
+        fdDisplacementZ, convFDDisplacementZ, opt3DisplacementZ, opt5DisplacementZ, specfemWaveformsZ,
+        haveSeismicWavePC,
+        stationErrorMetrics, globalErrorMetrics)
+end
 devSave(waveformFigure, "waveform_fit_all_solvers")
 println("DONE")

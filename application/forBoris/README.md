@@ -33,6 +33,30 @@ physical, not absorbing.
 
 Output quantity is **displacement** (u_x, u_z), not velocity.
 
+**On "incidence angle":** this is a point source, not a plane wave, so there
+is no single incidence angle -- each receiver sits at its own angle from
+the source. Measured from vertical (0 deg = straight down from source to
+receiver, i.e. no lateral offset):
+
+| receiver x (km) | horizontal offset from source (km) | vertical offset (km) | angle from vertical |
+|---|---|---|---|
+| -30 | 20 | 10 | 63.4 deg |
+| -20 | 10 | 10 | 45.0 deg |
+| -10 | 0  | 10 | 0.0 deg (directly above the source) |
+| 0   | 10 | 10 | 45.0 deg |
+| 10  | 20 | 10 | 63.4 deg |
+
+(source at x=-10 km, z=-20 km; receivers at z=-10 km, i.e. 10 km above the
+source -- angle = atan(|horizontal offset| / 10 km).)
+
+The wavelet is a Ricker pulse, `(1-2a^2)*exp(-a^2)` with
+`a = pi*f0*(t-delay)`, `f0 ~= 0.6495 Hz`, `delay = 1.5/f0 ~= 2.31 s`, applied
+as a vertical force Gaussian-smoothed in space (sigma = 500 m, cutoff 2 sigma)
+around the source position -- all of this, plus the model (vp0/vs0/rho0), is
+now also printed directly on `opt3_vs_opt5_waveforms.png` itself, not only
+here, after an earlier version of this plot proved hard to reproduce from
+the image alone.
+
 ## Run it
 
 ```sh
