@@ -69,6 +69,9 @@ module flexOPT
     export bsplineTestFunction, hatTestFunction, centredBspline, mixTestFunctions,
            testFunctionMoments, predictedOrder, optimalTestFunctionWeights, flexOPTRefPoints
 
+    # cut-cell volume integrals: free surface / discontinuities cutting the grid (Claude-authored, Nov 2026)
+    include("../src/cutCells/cutCells.jl")
+
     # semi-symbolics operators to fully numerical operators
     #include("fullyNumericalOPT/makeCostFunctions.jl")
     include("fullyNumericalOPT/makeCostFunctions.jl")

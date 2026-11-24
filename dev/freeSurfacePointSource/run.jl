@@ -397,7 +397,7 @@ waveformCaptionLine3 = "Source: vertical point force, embedded at x=$(round(Int,
     "the farthest stations); Gaussian-smoothed in space, sigma=$(round(Int,sourceSpatialSigma)) m"
 waveformCaptionLine4 = "Wavelet: Ricker, f0=$(round(sourceFrequency;digits=4)) Hz, delay=$(round(sourceDelay;digits=3)) s " *
     "-- (1-2a^2)exp(-a^2), a=pi*f0*(t-delay); total force=$(sourceForce) N/m (2-D line force)"
-waveformFigure = Figure(size=(1000, 170 * length(receiverX) + 110))
+waveformFigure = Figure(size=(1500, 170 * length(receiverX) + 150))
 for (i, xr) in enumerate(receiverX)
     ax = Axis(waveformFigure[i + 1, 1]; ylabel="x=$(round(Int, xr/1e3)) km",
         xlabel=(i == length(receiverX) ? "time (s)" : ""))
@@ -405,8 +405,8 @@ for (i, xr) in enumerate(receiverX)
     lines!(ax, opt5DisplacementZ.time, opt5DisplacementZ.values[:, i]; label="OPT5", color=:crimson, linestyle=:dash)
     i == 1 && axislegend(ax; position=:rt)
 end
-Label(waveformFigure[0, 1], waveformCaptionLine1; fontsize=14, font=:bold)
+Label(waveformFigure[0, 1], waveformCaptionLine1; fontsize=14, font=:bold, word_wrap=true)
 Label(waveformFigure[1, 1], waveformCaptionLine2 * "\n" * waveformCaptionLine3 * "\n" * waveformCaptionLine4;
-    fontsize=10, justification=:left, halign=:left)
+    fontsize=10, justification=:left, halign=:left, word_wrap=true)
 devSave(waveformFigure, "opt3_vs_opt5_waveforms")
 println("DONE")

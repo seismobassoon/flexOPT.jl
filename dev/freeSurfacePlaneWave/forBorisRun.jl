@@ -127,7 +127,7 @@ for step in ("normal", "nosurface")   # always both, not user-selectable here
         "NOT diverge like this, that is useful evidence the issue is specific to this closure." :
         "Control run: no free surface, so no closure is exercised here at all -- should track analytical closely."
 
-    forBorisFigure = Figure(size=(1100, 220 * length(observerDepths) + 150))
+    forBorisFigure = Figure(size=(1600, 220 * length(observerDepths) + 190))
     forBorisMetrics = NamedTuple[]
     for (row, depth) in enumerate(observerDepths)
         axis = Axis(forBorisFigure[row + 1, 1]; ylabel="z=$(round(depth/1e3; digits=1)) km",
@@ -151,9 +151,9 @@ for step in ("normal", "nosurface")   # always both, not user-selectable here
         end
         push!(forBorisMetrics, (depth=depth, OPT3=metricAt(optTrace), OPT5=metricAt(opt5Trace)))
     end
-    Label(forBorisFigure[0, 1], forBorisCaptionLine1; fontsize=14, font=:bold)
+    Label(forBorisFigure[0, 1], forBorisCaptionLine1; fontsize=14, font=:bold, word_wrap=true)
     Label(forBorisFigure[1, 1], forBorisCaptionLine2 * "\n" * forBorisCaptionLine3 * "\n" *
-        forBorisCaptionLine4 * "\n" * forBorisCaptionLine5; fontsize=10, justification=:left, halign=:left)
+        forBorisCaptionLine4 * "\n" * forBorisCaptionLine5; fontsize=10, justification=:left, halign=:left, word_wrap=true)
     foreach(display, forBorisMetrics)
     devSave(forBorisFigure, "forBoris_vs_analytical_uz")
 
