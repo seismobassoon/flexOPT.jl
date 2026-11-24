@@ -1,16 +1,27 @@
-# forBoris — OPT3 / OPT5 point-force reference on a flat free surface
+# forBoris — OPT3 / OPT5 reference benchmarks: point force and plane wave, flat free surface
 
-A clean OPT3/OPT5 reference benchmark meant to be run against an independent
-code (SeismicWavePC.jl, or anything else): a single vertical point force in a
-homogeneous elastic half-space with a flat free surface at z = 0.
+Two clean OPT3/OPT5 reference benchmarks meant to be run against an
+independent code (SeismicWavePC.jl, or anything else), both with a flat free
+surface at z = 0 in a homogeneous elastic half-space:
 
-This is a trimmed, non-interactive port of
-`notebooks/HomogeneousElastic2DBenchmark_FreeSurface.ipynb` (the same physical
-setup that notebook already validates OPT3/OPT5 against FD3 and SPECFEM2D
-with). Only OPT3 and OPT5 run here — no SPECFEM2D, no FD3 — so this has no
-extra dependency beyond flexOPT itself.
+1. **Point force** (`run.jl`) — a single vertical point force embedded in the
+   medium. Needs source-amplitude/source-time-function conventions to be
+   matched between codes (see the caveats below).
+2. **Plane wave** (`runPlaneWave.jl`) — a normal-incidence plane P wave,
+   injected as an *exact closed-form initial condition*, no body force
+   anywhere. There is **no amplitude or source-time-function convention to
+   match at all** between codes for this one — just the same model
+   (vp/vs/rho), the same initial field, and a free surface at z = 0. This
+   also carries a known, currently-open issue in OPT3's free-surface closure
+   (see below) that an independent cross-check is specifically useful for.
 
-## The physical setup
+Both are trimmed, non-interactive ports of this repository's own validated
+benchmarks: only OPT3 and OPT5 run here — no SPECFEM2D, no FD3 — so neither
+has any extra dependency beyond flexOPT itself.
+
+## 1. Point-force benchmark
+
+### The physical setup
 
 | quantity | value | units |
 |---|---|---|
@@ -57,7 +68,7 @@ now also printed directly on `opt3_vs_opt5_waveforms.png` itself, not only
 here, after an earlier version of this plot proved hard to reproduce from
 the image alone.
 
-## Run it
+### Run it
 
 ```sh
 julia --project=. application/forBoris/run.jl run           # quick: 60 km half-width, 9 s
@@ -81,9 +92,10 @@ will fail loudly, before anything expensive runs, if something is off.
 * `forBoris_opt3_opt5_traces.csv` — the same traces, one column per
   receiver/component/solver, for anything that isn't Julia.
 * `opt3_vs_opt5_waveforms.png` — u_z wiggle record section, OPT3 vs OPT5, one
-  panel per receiver.
+  panel per receiver, with the model/source/wavelet printed on the figure
+  itself.
 
-## Reproducing this in SeismicWavePC.jl
+### Reproducing this in SeismicWavePC.jl
 
 The mapping below is what we worked out comparing this benchmark's
 conventions against `SeismicWavePC.jl`'s API (`ForceSource`, `Station`,
@@ -125,7 +137,10 @@ across receivers should already agree):**
    once, then rescale one trace set by the ratio of peak amplitudes at a
    receiver away from the free surface (so the comparison is about waveform
    shape/timing/relative-amplitude-across-receivers, which is the part that
-   is convention-independent).
+   is convention-independent). (This is exactly what the flexOPT-side
+   comparison script does when folding SeismicWavePC.jl traces into its own
+   figures: a per-station peak-amplitude rescale plus a cross-correlation
+   time-alignment, documented in dev/freeSurfacePointSource/runWithReferences.jl.)
 2. **Source time function.** This benchmark's `rickerSource(t)` is
    `(1-2a²)e^{-a²}` with `a = π·f·(t - delay)`, `delay = 1.5/f`. SeismicWavePC's
    built-in `:ricker` is the same functional form but centred and scaled by
@@ -139,11 +154,90 @@ just get numbers to diff against, the CSV/JLD2 above already has everything
 (frequency, delay, force, geometry) needed to build the comparison from the
 other side.
 
+## 2. Plane-wave benchmark
+
+### The physical setup
+
+| quantity | value | units |
+|---|---|---|
+| P velocity `vp0` | 6000 | m/s |
+| S velocity `vs0` | 3464 | m/s |
+| density `rho0` | 2700 | kg/m³ |
+| incidence | **0° (normal incidence)** — a true plane wave, purely vertical and x-independent by construction | — |
+| source | **none** — the wave is injected as an exact closed-form initial condition (two counter-propagating copies of the same pulse); see the derivation in `dev/freeSurfacePlaneWave/stages/analytical.jl` | — |
+| wavelet | Ricker, same formula as the point-force benchmark: `(1-2a²)e^{-a²}`, `a = π·f0·(t-delay)`, `f0 ≈ 0.6495 Hz`, `delay = 1.5/f0 ≈ 2.31 s` | — |
+| free surface | flat, at z = 0 (void above; "normal" step) — compared against a no-free-surface control ("nosurface" step) | — |
+| observation depths | z0−8, z0+5, z0+10, z0+15, −3 km, where z0 = −20 km (a travel-time phase reference only — there is no source location) | km |
+| grid spacing `dx` | 250 m (`dx/2`, finer than the point-force case) | — |
+| duration | 6 s (quick) / 9 s (`--full`) | — |
+
+Because the field never depends on x by construction, there is no lateral
+wave to reflect off anything — the only truncation that matters is the
+bottom one, kept duration-safe the same way as the point-force benchmark.
+Both "normal" (actual free surface) and "nosurface" (control: fully solid
+medium, no closure exercised at all) always run together, in one invocation.
+
+**Why no source-amplitude or source-time-function convention to match**:
+unlike the point-force case, this benchmark needs no body force, no
+Green's-function calibration, and no areal-force-density/dx-normalization
+convention at all. Reproducing it in any other code is just: build the same
+homogeneous model, seed a purely vertical, x-independent `u_z(z, t=0)` field
+using the SAME formula (below), put a flat free surface at z = 0, and
+propagate with zero forcing from there on.
+
+```
+u_z(z, t) = pulse(t - (z - z0)/vp)  +  pulse(t + (z - z0)/vp)     # "normal" (free surface)
+u_z(z, t) = pulse(t - (z - z0)/vp)                                 # "nosurface" (control; direct wave only)
+pulse(t) = (1 - 2a²)·exp(-a²),   a = π·f0·(t - delay)
+```
+
+(the two-counter-propagating-copies form is the plane-wave analogue of the
+method-of-images mirror source: it satisfies the zero-traction free-surface
+condition *exactly*, for any pulse shape, by construction — see
+`stages/analytical.jl`'s full derivation.)
+
+**KNOWN OPEN ISSUE, surfaced here deliberately, not hidden:** OPT3's
+free-surface closure (an additive `elasticTractionFree2D` construction) is
+known, as of this writing, to **blow up partway through the "normal" run**
+(its trace is truncated/divergent in the output figure, not hidden or
+asserted away). The "nosurface" control has never shown this. **This is
+exactly the kind of thing an independent code is useful for**: if your own
+normal-incidence response does *not* diverge like this, that's evidence the
+issue is specific to this closure rather than to the physical setup — please
+let us know either way.
+
+### Run it
+
+```sh
+julia --project=. application/forBoris/runPlaneWave.jl run           # quick
+julia --project=. application/forBoris/runPlaneWave.jl run --full    # fuller
+```
+
+Always runs both "normal" and "nosurface" in one invocation (not
+user-selectable here). Reuses the same OPT3/OPT5 semi-symbolic/operator
+caches as the point-force benchmark and as this repository's own
+`dev/freeSurfacePlaneWave/run.jl`.
+
+### Output
+
+`dev/freeSurfacePlaneWave/outputs/normal/` and `.../nosurface/`:
+* `forBoris_vs_analytical_uz.png` — u_z, OPT3 and OPT5 vs the exact
+  analytical solution, one panel per observation depth, model/incidence/
+  wavelet/known-issue printed on the figure itself. The y-axis is clipped to
+  3× the analytical peak at each depth, so a divergent OPT3 trace is still
+  visibly cut off rather than compressing everything else to a flat line.
+* `forBoris_vs_analytical_metrics.jld2` — `observerDepths` and
+  `forBorisMetrics` (per-depth `max_abs_error`/`relative_error`/
+  `max_analytical`/`max_numerical` for OPT3 and OPT5 against the exact
+  closed form).
+
 ## Files
 
 * `application/forBoris/run.jl` — thin entry point, forwards to
-  `dev/freeSurfacePointSource/run.jl`.
-* `dev/freeSurfacePointSource/run.jl` — the actual physics: a trimmed,
+  `dev/freeSurfacePointSource/run.jl` (point-force benchmark).
+* `application/forBoris/runPlaneWave.jl` — thin entry point, forwards to
+  `dev/freeSurfacePlaneWave/forBorisRun.jl` (plane-wave benchmark).
+* `dev/freeSurfacePointSource/run.jl` — the point-force physics: a trimmed,
   byte-faithful port of cells 3 (config), 8 (OPT3/OPT5 semi-symbolic
   recipes), 9 (operators + free-surface closure + safety audits), 10
   (propagation) and 16 (receiver traces) of
@@ -153,3 +247,11 @@ other side.
   the `:shifted_full` closure, the Takeuchi & Geller A90 mass-hybrid
   experiment, and the Γ-redistribution ablation are all still in the
   notebook if you want to dig deeper, just not ported here.
+* `dev/freeSurfacePlaneWave/forBorisRun.jl` — the plane-wave physics: reuses
+  `dev/freeSurfacePlaneWave/stages/{config,opt,opt_build,opt_propagate,
+  analytical}.jl` unchanged (FD3 and SPECFEM2D stages dropped), with its own
+  compare/plot section (OPT3/OPT5 vs analytical only, captioned for
+  reproducibility). `dev/freeSurfacePlaneWave/run.jl` is the fuller version
+  with FD3/SPECFEM2D cross-checks and the frequency-sweep diagnostic, kept
+  for this repository's own ongoing debugging of the free-surface-closure
+  issue above.
