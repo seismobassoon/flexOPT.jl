@@ -25,7 +25,7 @@ blocks `*.nd`, `*.zip`, `*.jld2` and `outputs/` (the check figures).
 | | |
 |---|---|
 | frequencies | 0 – 0.05 Hz, Δf = 1/3276.8 s (165 frequencies), elastic (no Q), ω_I from omegaiTlen = 1e-2 |
-| depths | 0, 20, 40, … km down to the top of the fluid core, + both sides of every discontinuity |
+| depths | every 5 km from 0 to 60 km (crust, surface waves), then every 20 km down to the top of the fluid core, + both sides of every discontinuity |
 | distances | 0 – 180°, every 0.5° |
 | content | 10 strain + 5 displacement pairs, ComplexF32, ≈ 0.5 GB per model (≈ 0.5 TB for 1000 models) |
 | solver | OPT3, radial step h = 5 km, lmax(ω) = ωR/2 + 100 |
@@ -48,6 +48,10 @@ scp OUTPUT_ND.zip stella:/gpfs/scratch/nobuaki/moonRSGT/       # from your Mac
 cd /gpfs/scratch/nobuaki/moonRSGT && unzip OUTPUT_ND.zip && rm -rf __MACOSX
 mkdir -p /gpfs/scratch/nobuaki/moonRSGT/logs
 
+# all at once (check, then the array only if the check job succeeded):
+bash dev/moonRSGT/slurm/submit_all.sh
+
+# or step by step:
 # 2. prepare + check on a compute node (S-CAPAD/DANTE rule: never run julia on stella*)
 cd /gpfs/users/nobuaki/github/flexOPT.jl
 sbatch dev/moonRSGT/slurm/prepare_check.sbatch     # logs in /gpfs/scratch/nobuaki/moonRSGT/logs/

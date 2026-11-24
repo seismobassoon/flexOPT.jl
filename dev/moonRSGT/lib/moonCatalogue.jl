@@ -8,7 +8,7 @@
 # station is equivalent, so ONE pole disk per model is enough:
 #
 #   computeSGTDisk(...; family = :force, rs_km = R)   (dev/spherical1DelasticKernel/lib/sgtDisk1D.jl)
-#   stored on   depths 0, dz, 2dz, ... down to the top of the fluid core,
+#   stored on   depths 0:dzShallow:zShallow, then every dz down to the top of the fluid core,
 #               + both sides of every discontinuity above it,
 #           ×   epicentral distances 0:dθ:180°,
 #           ×   frequencies 0 ... fmax (Δf = 1/tlen),
@@ -27,7 +27,9 @@ moonDefaultParams() = Dict{String,Any}(
     "version" => MOON_RSGT_VERSION,
     "scheme" => "OPT3",          # radial operator (DSMconv also possible)
     "h" => 5.0,                  # km, radial grid step of the solver (≥ 12 intervals per zone)
-    "dz" => 20.0,                # km, catalogue depth step
+    "dz" => 20.0,                # km, catalogue depth step (below zShallow)
+    "dzShallow" => 5.0,          # km, catalogue depth step from the surface to zShallow (crust: surface waves)
+    "zShallow" => 60.0,          # km
     "dθ" => 0.5,                 # degrees, catalogue distance step
     "tlen" => 3276.8,            # s
     "fmax" => 0.05,              # Hz
@@ -47,13 +49,15 @@ physical-layer index (1 = top) used as the interpolation block, so the
 depth interpolation never crosses a discontinuity but does cross the
 artificial cubic-fit zone boundaries inside a layer.
 """
-function catalogueRadii(info; dz::Real)
+function catalogueRadii(info; dz::Real, dzShallow::Real=dz, zShallow::Real=0.0)
     R = info.R
+    zmax = info.layers[end].dbot
+    grid = sort(unique(vcat(collect(0.0:dzShallow:zShallow), collect(dz*ceil(zShallow / dz):dz:zmax))))
     rows = NamedTuple[]
     for (k, L) in enumerate(info.layers)
         L.fluid && break                         # stop at the top of the fluid core
         d = [L.dtop]
-        for x in dz*ceil(L.dtop / dz):dz:L.dbot
+        for x in grid
             (x - L.dtop > 1e-6 && L.dbot - x > 1e-6) && push!(d, x)
         end
         push!(d, L.dbot)
@@ -117,7 +121,7 @@ function buildMoonRSGT(ndFile::AbstractString, outFile::AbstractString;
     verbose && println(moonModelSummary(info))
     psv, sh = moonSystems(mm.model, params; recipes=recipes, configs=configs)
     t1 = time()
-    rad = catalogueRadii(info; dz=params["dz"])
+    rad = catalogueRadii(info; dz=params["dz"], dzShallow=params["dzShallow"], zShallow=params["zShallow"])
     disk = computeSGTDisk(psv, sh, mm.model; family=:force, rs_km=info.R,
                           radii=(r_km=rad.r_km, side=rad.side),
                           θdeg=0:params["dθ"]:180, tlen=params["tlen"], fmax=params["fmax"],

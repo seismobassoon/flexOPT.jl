@@ -16,7 +16,7 @@
 #   julia --project=. dev/moonRSGT/run.jl info                 # which catalogue files exist
 # Options: --nd-dir=DIR --out-dir=DIR --force (recompute existing files)
 #   parameter overrides (defaults in lib/moonCatalogue.jl, moonDefaultParams):
-#   --scheme=OPT3|DSMconv --h=5 --dz=20 --dtheta=0.5 --fmax=0.05 --tlen=3276.8 --fitTol=0.005
+#   --scheme=OPT3|DSMconv --h=5 --dz=20 --dzShallow=5 --zShallow=60 --dtheta=0.5 --fmax=0.05 --tlen=3276.8 --fitTol=0.005
 
 include(joinpath(@__DIR__, "..", "common", "devBootstrap.jl"))     # repo root + Pkg.activate (nothing else used)
 
@@ -31,7 +31,7 @@ function parseMoonArgs(args)
         opt[kv[1]] = length(kv) == 2 ? kv[2] : "true"
     end
     known = ("nd-dir", "out-dir", "models", "task", "per-task", "model", "force",
-             "scheme", "h", "dz", "dtheta", "fmax", "tlen", "fitTol")
+             "scheme", "h", "dz", "dzShallow", "zShallow", "dtheta", "fmax", "tlen", "fitTol")
     for k in keys(opt)
         k in known || error("unknown option --$k")
     end
@@ -49,7 +49,7 @@ println("moonRSGT: step $MOON_STEP, $(length(ndFiles)) models in $ndDir, catalog
 include(joinpath(@__DIR__, "env.jl"))
 
 params = moonDefaultParams()
-for (k, key, T) in (("scheme", "scheme", String), ("h", "h", Float64), ("dz", "dz", Float64),
+for (k, key, T) in (("scheme", "scheme", String), ("h", "h", Float64), ("dz", "dz", Float64), ("dzShallow", "dzShallow", Float64), ("zShallow", "zShallow", Float64),
                     ("dtheta", "dθ", Float64), ("fmax", "fmax", Float64), ("tlen", "tlen", Float64),
                     ("fitTol", "fitTol", Float64))
     haskey(MOON_OPT, k) && (params[key] = T === String ? MOON_OPT[k] : parse(T, MOON_OPT[k]))
@@ -85,7 +85,7 @@ if MOON_STEP == "prepare"
     println("first model: ", moonModelSummary(infos[1]))
     nω = floor(Int, params["fmax"] * params["tlen"]) + 1
     nθ = length(0:params["dθ"]:180)
-    nr = length(catalogueRadii(infos[1]; dz=params["dz"]).r_km)
+    nr = length(catalogueRadii(infos[1]; dz=params["dz"], dzShallow=params["dzShallow"], zShallow=params["zShallow"]).r_km)
     per = 8 * 15 * nω * nr * nθ
     @printf("catalogue: %d ω × %d r × %d θ × 15 pairs (ComplexF32) = %.2f GB per model, %.0f GB for %d models\n",
             nω, nr, nθ, per / 1e9, per * length(ndFiles) / 1e9, length(ndFiles))
