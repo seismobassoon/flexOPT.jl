@@ -1,0 +1,6 @@
+# Moon models are confidential: never commit them, nor anything computed from them
+*.nd
+*.zip
+OUTPUT_ND/
+outputs/
+*.jld2
