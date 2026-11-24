@@ -66,6 +66,39 @@ solved with K), and prints the relative L2 differences of spectra and of
 traces (Gaussian half-duration 10 s).  The wiggle overlay is saved in
 `dev/moonRSGT/outputs/check/` (git-ignored).  Run it before the array.
 
+## Quick calls (SAC/GCMT names)
+
+Julia (on a compute node: `srun -p ncpushort -n1 -c1 --mem=4G -t 1:00:00 --pty bash`, or Jupyterhub):
+
+```julia
+include("/gpfs/users/nobuaki/github/flexOPT.jl/dev/moonRSGT/lib/moonSynthetics.jl")
+tr = moonSeismogram("00817"; stla=-3.0, stlo=-23.4, evla=20.0, evlo=15.0, evdp=900.0,
+                    Mrr=1e15, Mtt=-5e14, Mpp=-5e14, Mrt=0.0, Mrp=0.0, Mtp=0.0)   # GCMT, N·m
+tr.t, tr.data[:Z], tr.data[:R], tr.data[:T], tr.Δdeg
+# options: comps=(:Z,:N,:E), dt=0.5, halfDuration=15.0, quantity=:velocity
+for id in moonModelIds()                                   # all models (catalogue reloaded per model)
+    s = moonSeismogram(id; stla=-3.0, stlo=-23.4, evla=20.0, evlo=15.0, evdp=900.0,
+                       Mrr=1e15, Mtt=-5e14, Mpp=-5e14, Mrt=0.0, Mrp=0.0, Mtp=0.0)
+end
+```
+
+Command line / batch (`synth.jl`, one JLD2 = HDF5 output for many models × source-station pairs):
+
+```sh
+julia --project=. dev/moonRSGT/synth.jl --models=all --requests=req.csv --out=synth.jld2
+# req.csv header: stla,stlo,evla,evlo,evdp,mrr,mtt,mpp,mrt,mrp,mtp  (one line per synthetic)
+```
+
+Python (students; numpy + h5py; calls synth.jl, wrapped in `srun` outside a Slurm job):
+
+```python
+import sys; sys.path.append("/gpfs/users/nobuaki/github/flexOPT.jl/dev/moonRSGT/python")
+from moon_rsgt import moon_synthetics
+t, data, models = moon_synthetics("all", stla=-3.0, stlo=-23.4, evla=20.0, evlo=15.0, evdp=900.0,
+                                  mrr=1e15, mtt=-5e14, mpp=-5e14, mrt=0, mrp=0, mtp=0)
+# data[ireq, imodel, icomp, it], comps "ZRT"
+```
+
 ## Using it (students)
 
 The reader only needs JLD2 (it includes the geometry and interpolation files of

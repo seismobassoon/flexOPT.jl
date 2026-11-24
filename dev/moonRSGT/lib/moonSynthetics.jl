@@ -224,3 +224,34 @@ function moonSyntheticsAllModels(ids=moonModelIds(); dir=moonRSGTDir(), verbose:
     end
     return out
 end
+
+# ---------------------------------------------------------------------------
+# one-call form with the usual seismological names (SAC / GCMT)
+# ---------------------------------------------------------------------------
+
+const _MOON_LAST = Ref{Any}(nothing)     # last catalogue loaded (one model in memory, ≈ 0.5 GB)
+
+"Catalogue of `model` (id, file or an already loaded catalogue), reusing the last one loaded."
+function _moonCat(model; dir=moonRSGTDir())
+    model isa NamedTuple && return model
+    f = (model isa AbstractString && isfile(model)) ? String(model) : moonRSGTFile(model; dir=dir)
+    c = _MOON_LAST[]
+    (isnothing(c) || c.file != f) && (_MOON_LAST[] = loadMoonRSGT(f))
+    return _MOON_LAST[]
+end
+
+"""
+    moonSeismogram(model; stla, stlo, evla, evlo, evdp, Mrr, Mtt, Mpp, Mrt, Mrp, Mtp,
+                   comps=(:Z, :R, :T), dt=1.0, halfDuration=10.0, quantity=:displacement, dir=moonRSGTDir())
+
+Synthetics for model `model` (id such as 817 or "00817", a file, or a loaded
+catalogue): station (stla, stlo), event (evla, evlo, evdp in km), moment
+tensor in GCMT order and convention (r up, t south, p east), N·m.
+Returns (t, data::Dict{Symbol,Vector}, Δdeg, ...) as `moonSynthetics`.
+Calling it again with the same model does not reload the catalogue.
+"""
+function moonSeismogram(model; stla, stlo, evla, evlo, evdp, Mrr, Mtt, Mpp, Mrt, Mrp, Mtp,
+                        dir=moonRSGTDir(), kwargs...)
+    return moonSynthetics(_moonCat(model; dir=dir); station=(stla, stlo), source=(evla, evlo, evdp),
+                          M=fromGCMT(Mrr, Mtt, Mpp, Mrt, Mrp, Mtp), kwargs...)
+end
