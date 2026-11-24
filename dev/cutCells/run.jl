@@ -182,8 +182,10 @@ if "geometry" in DEV.steps
     println("\n== small cut cells: void nodes merged into a solid neighbour")
     aggregation = sliverAggregation(geom)
     voidCut = [I for I in nodes if !solid[I]]
-    @printf("  %d void cut nodes, %d merged\n", length(voidCut), length(aggregation))
-    length(aggregation) == length(voidCut) || error("check failed: every void cut node must be merged")
+    merged = [a for a in aggregation if a.aggregate]
+    @printf("  %d void cut nodes, %d merged, %d more void nodes extended (read by cut rows)\n",
+        length(voidCut), length(merged), length(aggregation) - length(merged))
+    Set(a.node for a in merged) == Set(voidCut) || error("check failed: every void cut node must be merged")
     for agg in aggregation
         solid[agg.target] || error("check failed: target $(agg.target) is not solid")
         all(solid[node] for (node, _) in agg.extension) || error("check failed: extension uses a void node")

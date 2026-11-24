@@ -17,46 +17,69 @@
 # `applyAggregation(...; aggregate_test=false)`.
 
 """
-    sliverAggregation(geom; side=:minus, extension=:linear)
+    sliverAggregation(geom; side=:minus, extension=:linear, reach=1)
 
-For every node of `cutNodes(geom; side)` that is NOT on `side`, the target
-neighbour `J` on `side` (the stencil neighbour whose direction is closest to
-the inward normal) and the extension `[(node, weight), ...]` that defines its
-value. Returns a vector of `(node, target, extension)`.
+Void-side nodes (not on `side`) that a cut-cell row can read:
+
+* the cut nodes on the other side (their support reaches a sliver of
+  material): value extended AND row merged into the target (`aggregate=true`);
+* every other node of the other side within `reach` grid steps (Chebyshev
+  distance) of a cut node (the stencil half-width; 1 for OPT3): value
+  extended only (`aggregate=false`) -- otherwise a cut row would read a
+  pinned zero there.
+
+The extension follows the grid direction `o` closest to the inward normal:
+`J = I + k o` is the first node on `side`, `K = J + o`, and
+u_I = (1+k) u_J - k u_K (linear) or u_J (constant, or when K is not on
+`side`). Returns a vector of `(node, target, extension, aggregate)`.
 """
 function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
-                           extension::Symbol=:linear) where {N}
+                           extension::Symbol=:linear, reach::Int=1) where {N}
     extension in (:linear, :constant) ||
         throw(ArgumentError("extension must be :linear or :constant"))
     ls = geom.levelSet
     mask = sideMask(ls; side=side)
+    cut = cutNodes(geom; side=side)
+    cutSet = Set(cut)
+    candidates = Set{CartesianIndex{N}}()
+    for I in cut, o in CartesianIndices(ntuple(_ -> -reach:reach, N))
+        J = I + o
+        (checkbounds(Bool, mask, J) && !mask[J]) && push!(candidates, J)
+    end
     out = NamedTuple[]
-    for I in cutNodes(geom; side=side)
-        mask[I] && continue
+    for I in sort!(collect(candidates))
         n = levelSetNormal(ls, nodeCoordinates(ls, I))
         inward = side === :minus ? -n : n
         best = nothing
+        bestK = 0
         bestScore = -Inf
         for o in CartesianIndices(ntuple(_ -> -1:1, N))
             all(iszero, Tuple(o)) && continue
-            J = I + o
-            (checkbounds(Bool, mask, J) && mask[J]) || continue
-            direction = normalize(SVector{N,Float64}(Tuple(o) .* ls.spacing))
-            score = dot(direction, inward)
-            if score > bestScore
-                best, bestScore = o, score
+            k = 0
+            for s in 1:reach+1
+                J = I + s * o
+                checkbounds(Bool, mask, J) || break
+                if mask[J]
+                    k = s
+                    break
+                end
+            end
+            k == 0 && continue
+            score = dot(normalize(SVector{N,Float64}(Tuple(o) .* ls.spacing)), inward)
+            if score > bestScore + 1e-12 || (abs(score - bestScore) <= 1e-12 && k < bestK)
+                best, bestK, bestScore = o, k, score
             end
         end
-        isnothing(best) && error("node $I has no neighbour on side $side to merge into")
-        J = I + best
+        isnothing(best) && error("node $I has no node on side $side within $(reach + 1) steps")
+        J = I + bestK * best
         weights = [(J, 1.0)]
         if extension === :linear
             K = J + best
             if checkbounds(Bool, mask, K) && mask[K]
-                weights = [(J, 2.0), (K, -1.0)]
+                weights = [(J, 1.0 + bestK), (K, -Float64(bestK))]
             end
         end
-        push!(out, (node=I, target=J, extension=weights))
+        push!(out, (node=I, target=J, extension=weights, aggregate=(I in cutSet)))
     end
     return out
 end
@@ -68,7 +91,7 @@ Apply `sliverAggregation` output to a prepared linear system (the NamedTuple
 of `prepareLinearSystem` / `overlapBoundaryLinearSystem`):
 
 1. `aggregate_test`: row(target) += row(sliver node), for `A_unknown`,
-   `L_known` and `R_force`, every field;
+   `L_known` and `R_force`, every field (only entries with `aggregate=true`);
 2. row(sliver node) := u_node - Σ w u_extension (future level only;
    its `L_known` and `R_force` rows are zeroed).
 
@@ -89,6 +112,7 @@ function applyAggregation(prepared, aggregation; model2whole=identity,
     if aggregate_test
         Is, Js, Vs = Int[], Int[], Float64[]
         for agg in aggregation
+            (hasproperty(agg, :aggregate) && !agg.aggregate) && continue
             lp = point_linear[model2whole(agg.node)]
             lt = point_linear[model2whole(agg.target)]
             for f in 1:NField

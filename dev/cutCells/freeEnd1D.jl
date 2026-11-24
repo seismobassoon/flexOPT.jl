@@ -30,6 +30,8 @@ flexOPT.set_default_form!(:weak)
 const FE = (dx=1.0, c=1.0, rho=1.0, pointsPerWavelength=16, sourceDistance=40.0,
     leftMargin=120.0, voidNodes=6, receiverDistances=(5.0, 20.0, 60.0), cfl=0.1,
     force=1.0, sourceSigma=1.0, sourceCutoff=3.0)
+# extension of the void nodes read by cut rows: ENV FLEXOPT_CUT_EXTENSION=linear (default) | constant
+CUT_EXTENSION = Symbol(get(ENV, "FLEXOPT_CUT_EXTENSION", "linear"))
 etaOfCase(case) = Dict("eta0" => 0.0, "eta025" => 0.25, "eta05" => 0.5, "eta075" => 0.75)[case]
 
 f0 = FE.c / (FE.pointsPerWavelength * FE.dx)
@@ -69,7 +71,7 @@ scheme1D = flexOPT.CutCellScheme(optParameters1D)
 resultsFE = Dict{String,Any}()
 for case in DEV.cases
     η = etaOfCase(case)
-    println("\n== free end between nodes, η = $η")
+    println("\n== free end between nodes, η = $η (void extension: $CUT_EXTENSION)")
     xs = 0.0 + η * FE.dx                          # free end; last solid node at x = 0
     x = collect(-(FE.sourceDistance + FE.leftMargin):FE.dx:(FE.voidNodes * FE.dx))
     nx = length(x)
@@ -77,9 +79,14 @@ for case in DEV.cases
     geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme1D.maxDegree)
     solid = flexOPT.sideMask(ls)
     cut = flexOPT.cutNodes(geom)
-    aggregation = flexOPT.sliverAggregation(geom)
-    farVoid = [I for I in CartesianIndices(ls.φ) if !solid[I] && !(I in cut)]
-    @show length(cut) [x[I[1]] for I in cut] [(x[a.node[1]], x[a.target[1]]) for a in aggregation]
+    aggregation = flexOPT.sliverAggregation(geom; extension=CUT_EXTENSION)
+    extended = Set(a.node for a in aggregation)
+    farVoid = [I for I in CartesianIndices(ls.φ) if !solid[I] && !(I in cut) && !(I in extended)]
+    @show length(cut) [x[I[1]] for I in cut]
+    for a in aggregation
+        println("  void node x = $(x[a.node[1]]): ", a.aggregate ? "merged into" : "extended from",
+            " x = $(x[a.target[1]]), u = ", join(["$(w) u($(x[n[1]]))" for (n, w) in a.extension], " + "))
+    end
 
     # material: homogeneous, extended over the void (the cut rows integrate the solid part only)
     rhoS = fill(FE.rho / FE.rho, nx)
