@@ -16,22 +16,11 @@
 #
 # Units: Δx = 1, c = 1, ρ = 1 (scaled coordinates, as the 2-D benchmarks).
 
-if !@isdefined(CUTCELLS_FULL_ENV)
-    !@isdefined(commonBatchs) && include(joinpath(flexopt_root, "src", "commonBatchs.jl"))
-    @eval using .commonBatchs
-    !@isdefined(backend) && include(joinpath(flexopt_root, "src", "batchFiles", "batchGPU.jl"))
-    !@isdefined(flexOPT) && include(joinpath(flexopt_root, "src", "flexOPT.jl"))
-    @eval using .flexOPT: set_default_form!, DEFAULT_FORM, makeOPTsemiSymbolic, getModelPoints,
-        numericalOperatorConstruction, prepareLinearSystem, propagateLinearSystem
-    global CUTCELLS_FULL_ENV = true
-end
-flexOPT.set_default_form!(:weak)
+include(joinpath(@__DIR__, "env.jl"))
 
 const FE = (dx=1.0, c=1.0, rho=1.0, pointsPerWavelength=16, sourceDistance=40.0,
     leftMargin=120.0, voidNodes=6, receiverDistances=(5.0, 20.0, 60.0), cfl=0.1,
     force=1.0, sourceSigma=1.0, sourceCutoff=3.0)
-# extension of the void nodes read by cut rows: ENV FLEXOPT_CUT_EXTENSION=linear (default) | constant
-CUT_EXTENSION = Symbol(get(ENV, "FLEXOPT_CUT_EXTENSION", "linear"))
 etaOfCase(case) = Dict("eta0" => 0.0, "eta025" => 0.25, "eta05" => 0.5, "eta075" => 0.75)[case]
 
 f0 = FE.c / (FE.pointsPerWavelength * FE.dx)
@@ -52,24 +41,13 @@ optParameters1D = Dict{String,Any}(
     "materItpl" => (ptsSpace=1, ptsTime=1, offsetSpace=1.0, offsetTime=1, YorderBspace=-1, YorderBtime=-1),
     "recipe_backend" => backend,
 )
-function cachedRecipe1D(parameters, prefix)
-    cacheParameters = Dict{String,Any}(k => v for (k, v) in parameters if k != "recipe_backend")
-    cacheParameters["recipe_cache_version"] = 9
-    myProduceOrLoad(cacheParameters, "semiSymbolic", prefix) do config
-        runtime = Dict{String,Any}(config)
-        pop!(runtime, "hash_id", nothing)
-        pop!(runtime, "recipe_cache_version", nothing)
-        runtime["recipe_backend"] = backend
-        flexOPT.makeOPTsemiSymbolic(runtime)
-    end
-end
-recipe1D = cachedRecipe1D(optParameters1D, "elastic1D_OPT3")
+recipe1D = cachedRecipe(optParameters1D, "elastic1D_OPT3")
 scheme1D = flexOPT.CutCellScheme(optParameters1D)
 @show scheme1D.maxDegree scheme1D.pointsShape
 
 # ------------------------------------------------------------------ cases
 resultsFE = Dict{String,Any}()
-for case in DEV.cases
+for case in filter(c -> startswith(c, "eta"), DEV.cases)
     η = etaOfCase(case)
     println("\n== free end between nodes, η = $η (void extension: $CUT_EXTENSION)")
     xs = 0.0 + η * FE.dx                          # free end; last solid node at x = 0
@@ -105,7 +83,7 @@ for case in DEV.cases
     probe = CartesianIndex(argmin(abs.(x .+ FE.sourceDistance .+ 20)))
     selfCheck = flexOPT.cutCellSelfCheck(scheme1D, volume, models, probe)
     @show selfCheck
-    maximum(values(selfCheck)) < 1e-8 || error("cut-cell rows of an uncut node differ from the volume rows: $selfCheck")
+    maximum(values(selfCheck)) < selfCheckTolerance(recipe1D) || error("cut-cell rows of an uncut node differ from the volume rows: $selfCheck")
 
     rows = flexOPT.cutCellRows(scheme1D, geom, cut, models, volume)
     system = flexOPT.installRows(volume, rows)
@@ -194,7 +172,7 @@ end
 
 println("\n== summary: reflection timing error vs stair-step (time units, Δx = c = 1)")
 @printf("  %-8s %-10s %-14s %-14s %-12s\n", "case", "receiver", "cut-cell lag", "stair-step", "peak ratio")
-for case in DEV.cases
+for case in filter(c -> startswith(c, "eta"), DEV.cases)
     r = resultsFE[case]
     for tr in r["traces"]
         @printf("  %-8s %-10.1f %+-14.3f %+-14.3f %-12.4f\n", case, tr.x, tr.lag, -2r["eta"], tr.peakRatio)

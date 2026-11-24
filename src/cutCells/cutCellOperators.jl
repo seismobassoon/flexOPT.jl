@@ -374,14 +374,16 @@ function _cutCellRowsWithMoments(scheme::CutCellScheme, lookup, nodes, models, p
     rowsL = Dict{Int,Vector{Tuple{Int,Float64}}}()
     rowsR = Dict{Int,Vector{Tuple{Int,Float64}}}()
     nodeValueCache = Dict{Any,Float64}()
+    blocks = vcat([(b, false) for b in scheme.lhs], [(scheme.rhs, true)])
+    entries = [_blockEntries(b, N) for (b, _) in blocks]
 
     for G in nodes
         lpG = pointLinear[model2whole(G)]
         materialAt = [CartesianIndex(ntuple(d -> clamp(G[d] + off[d], 1, modelShape[d]), N))
                       for off in stencilSpace]
-        for (block, isRHS) in vcat([(b, false) for b in scheme.lhs], [(scheme.rhs, true)])
+        for (iBlock, (block, isRHS)) in enumerate(blocks)
             coefficients = _cutCellBlockCoefficients(block, scheme, lookup, G, models,
-                materialAt, nodeValueCache)       # (P, NField or NForce, NExpr)
+                materialAt, nodeValueCache, entries[iBlock])       # (P, NField or NForce, NExpr)
             for iExpr in 1:block.NExpr
                 row = (lpG - 1) * block.NExpr + iExpr
                 for p2 in eachindex(stencilSpace), iField in 1:block.NField
@@ -414,58 +416,96 @@ function _cutCellRowsWithMoments(scheme::CutCellScheme, lookup, nodes, models, p
     (A=rowsA, L=rowsL, R=rowsR)
 end
 
-function _cutCellBlockCoefficients(block::CutCellBlock, scheme, lookup, G, models,
-                                   materialAt, nodeValueCache)
-    N = scheme.nSpace
+"""
+Node-independent bookkeeping of a block: for every α, the entries
+(row of S, column of S, time factor, linear index into the spatial table)
+of the contraction that `windowContraction!` performs.
+"""
+function _blockEntries(block::CutCellBlock, N::Int)
     nCoord = N + 1
+    L = size(block.C, 2)
+    Pμ, Pμᶜ = size(block.C, 3), size(block.Cc, 3)
+    shapes = [size(piece)[1:4] for piece in block.spacePieces]
+    slotLI = [LinearIndices(shape) for shape in shapes]
+    spatialLI = LinearIndices(Tuple(prod(shape) for shape in shapes))
+    entries = map(eachindex(block.alphaNodes)) do iα
+        rows, cols, factors, spatial = Int[], Int[], Float64[], Int[]
+        for idx in 1:size(block.table, 2)
+            lᶜ = block.table[1, idx, iα]
+            l = block.table[2, idx, iα]
+            (lᶜ > 0 && l > 0) || continue
+            kt = block.table[2+nCoord, idx, iα]
+            lpt = block.table[2+2nCoord, idx, iα]
+            (kt > 0 && lpt > 0) || continue
+            all(d -> block.table[2+d, idx, iα] > 0 && block.table[2+nCoord+d, idx, iα] > 0, 1:N) || continue
+            for iμᶜ in 1:Pμᶜ, iμ in 1:Pμ
+                timeFactor = block.timeIntegral[lpt, kt, block.tableμ[nCoord, iμ], block.tableμᶜ[nCoord, iμᶜ]]
+                timeFactor == 0.0 && continue
+                slots = ntuple(d -> slotLI[d][block.table[2+nCoord+d, idx, iα], block.table[2+d, idx, iα],
+                    block.tableμ[d, iμ], block.tableμᶜ[d, iμᶜ]], N)
+                push!(rows, lᶜ + (iμᶜ - 1) * L)
+                push!(cols, l + (iμ - 1) * L)
+                push!(factors, timeFactor)
+                push!(spatial, spatialLI[slots...])
+            end
+        end
+        (rows=rows, cols=cols, factors=factors, spatial=spatial)
+    end
+    return entries
+end
+
+"Contract axis `d` of `A` (its first `k` entries) with the matrix `M` (slots × powers)."
+function _contractAxis(A::AbstractArray, M::AbstractMatrix, d::Int, k::Int)
+    nd = ndims(A)
+    nd == 1 && return M[:, 1:k] * A[1:k]
+    perm = (d, (e for e in 1:nd if e != d)...)
+    B = permutedims(A, perm)
+    rest = size(B)[2:end]
+    Bk = reshape(collect(selectdim(B, 1, 1:k)), k, :)
+    C = reshape(M[:, 1:k] * Bk, size(M, 1), rest...)
+    return permutedims(C, invperm(perm))
+end
+
+"""
+Spatial factor of every slot combination for one node:
+T[s_1, ..., s_N] = Σ_cells Σ_a mS_cell[a] Π_d c_d(s_d, cell_d, a_d).
+"""
+function _spatialTable(block::CutCellBlock, moments, cellIndices)
+    N = length(block.spacePieces)
+    mats = [reshape(piece, prod(size(piece)[1:4]), size(piece, 5), size(piece, 6)) for piece in block.spacePieces]
+    table = zeros(Float64, Tuple(size(m, 1) for m in mats))
+    for K in cellIndices
+        A = moments[K]
+        for d in 1:N
+            M = mats[d][:, K[d], :]
+            A = _contractAxis(A, M, d, min(size(M, 2), size(A, d)))
+        end
+        table .+= A
+    end
+    return table
+end
+
+function _cutCellBlockCoefficients(block::CutCellBlock, scheme, lookup, G, models,
+                                   materialAt, nodeValueCache, entries)
+    N = scheme.nSpace
     P = size(block.C, 1)
     L = size(block.C, 2)
     Pμ, Pμᶜ = size(block.C, 3), size(block.Cc, 3)
-    ncells = map(o -> length(o), block.cellOffsets)
-    cellIndices = CartesianIndices(Tuple(ncells))
+    cellIndices = CartesianIndices(Tuple(length(o) for o in block.cellOffsets))
     moments = Dict(K => lookup(G + CartesianIndex(ntuple(d -> block.cellOffsets[d][K[d]], N)))
                    for K in cellIndices)
-    powers = CartesianIndices(ntuple(_ -> scheme.maxDegree + 1, N))
+    spatialTable = _spatialTable(block, moments, cellIndices)
     Cmat = reshape(block.C, P, L * Pμ)
     Ccmat = reshape(block.Cc, P, L * Pμᶜ)
     coefficients = zeros(Float64, P, block.NField, block.NExpr)
     S = zeros(Float64, L * Pμᶜ, L * Pμ)
     nVars = min(length(block.vars), length(models))
-
     for iα in eachindex(block.alphaNodes)
+        e = entries[iα]
+        isempty(e.rows) && continue
         fill!(S, 0.0)
-        for idx in 1:size(block.table, 2)
-            lᶜ = block.table[1, idx, iα]
-            l = block.table[2, idx, iα]
-            (lᶜ > 0 && l > 0) || continue
-            for iμᶜ in 1:Pμᶜ, iμ in 1:Pμ
-                kt = block.table[2+nCoord, idx, iα]
-                lpt = block.table[2+2nCoord, idx, iα]
-                (kt > 0 && lpt > 0) || continue
-                timeFactor = block.timeIntegral[lpt, kt, block.tableμ[nCoord, iμ], block.tableμᶜ[nCoord, iμᶜ]]
-                timeFactor == 0.0 && continue
-                valid = true
-                for d in 1:N
-                    (block.table[2+d, idx, iα] > 0 && block.table[2+nCoord+d, idx, iα] > 0) || (valid = false)
-                end
-                valid || continue
-                spatial = 0.0
-                for K in cellIndices
-                    m = moments[K]
-                    for a in powers
-                        v = m[a]
-                        v == 0.0 && continue
-                        for d in 1:N
-                            piece = block.spacePieces[d]
-                            a[d] <= size(piece, 6) || (v = 0.0; break)
-                            v *= piece[block.table[2+nCoord+d, idx, iα], block.table[2+d, idx, iα],
-                                block.tableμ[d, iμ], block.tableμᶜ[d, iμᶜ], K[d], a[d]]
-                        end
-                        spatial += v
-                    end
-                end
-                S[lᶜ+(iμᶜ-1)*L, l+(iμ-1)*L] += timeFactor * spatial
-            end
+        for k in eachindex(e.rows)
+            S[e.rows[k], e.cols[k]] += e.factors[k] * spatialTable[e.spatial[k]]
         end
         out = Ccmat * S * transpose(Cmat)            # (material point, field point)
         node = block.alphaNodes[iα]

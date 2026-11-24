@@ -5,6 +5,10 @@
 # end falls between two nodes, against the exact solution (freeEnd1D.jl);
 # cases eta0 eta025 eta05 eta075 (fraction of a cell beyond the last solid node).
 #
+# Step `tiltedPlane` (stage 2, 2-D): the validated flat point-force benchmark
+# rotated by θ on the same Cartesian grid (tiltedPlane.jl); cases tilt0
+# (reference, always run) tilt10 tilt20 tilt30 (default) tilt45.
+#
 # Step `geometry` (stage 1): exactness of the simplex rules, cut-cell moments
 # against closed forms in 1-D/2-D/3-D, convergence of circle/sphere areas,
 # tilted-plane geometry (normals, crossings, points+normals level set), and
@@ -18,6 +22,8 @@
 #   julia --project=. dev/cutCells/run.jl geometry
 #   julia --project=. dev/cutCells/run.jl freeEnd1D            # all η cases
 #   julia --project=. dev/cutCells/run.jl freeEnd1D eta05
+#   julia --project=. dev/cutCells/run.jl tiltedPlane            # tilt0 tilt10 tilt20 tilt30
+#   julia --project=. dev/cutCells/run.jl tiltedPlane tilt20 --redo=tilt
 # REPL:
 #   julia> include("dev/cutCells/run.jl"); cutCells("geometry")
 
@@ -39,8 +45,10 @@ include(joinpath(flexopt_root, "dev", "common", "devBootstrap.jl"))
 
 cutCells(args...) = (global APP_ARGS = collect(String, string.(args)); include(joinpath(@__DIR__, "run.jl")))
 
-DEV = parseDevArgs(@isdefined(APP_ARGS) ? APP_ARGS : ARGS; steps=["geometry", "freeEnd1D"], defaultStep="geometry",
-    cases=["eta0", "eta025", "eta05", "eta075"])
+DEV = parseDevArgs(@isdefined(APP_ARGS) ? APP_ARGS : ARGS; steps=["geometry", "freeEnd1D", "tiltedPlane"],
+    defaultStep="geometry",
+    cases=["eta0", "eta025", "eta05", "eta075", "tilt0", "tilt10", "tilt20", "tilt30", "tilt45"],
+    defaultCases=["eta0", "eta025", "eta05", "eta075", "tilt0", "tilt10", "tilt20", "tilt30"])
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 
 if !@isdefined(CutCellsCheck) || DEV.reload
@@ -237,4 +245,10 @@ end
 if "freeEnd1D" in DEV.steps
     DEV_STEP[] = "freeEnd1D"
     include(joinpath(@__DIR__, "freeEnd1D.jl"))
+end
+
+# ============================================================= tiltedPlane
+if "tiltedPlane" in DEV.steps
+    DEV_STEP[] = "tiltedPlane"
+    include(joinpath(@__DIR__, "tiltedPlane.jl"))
 end
