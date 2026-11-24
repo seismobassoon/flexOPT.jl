@@ -55,6 +55,18 @@ end
 if !@isdefined(PLANEWAVE_OVERLAP_MODE)
     const PLANEWAVE_OVERLAP_MODE = Ref{Symbol}(:additive)
 end
+# Lateral edges: pinning only the single outermost column each step (the
+# original design) left too thin a buffer for this narrow (nxHalfWidth=10)
+# domain -- a persistent edge/interior mismatch leaked all the way to the
+# measured center column within the run (xSpreadFD/xSpreadOPT comparable
+# to the signal itself: confirmed 2026-11-24, see codeVersions.jl). Pinning
+# a wider band fixes it at no extra grid cost (same domain, same dx) --
+# width=8 (of nxHalfWidth=10) brought xSpreadFD from ~1.1-1.4 down to
+# ~0.047 and OPT3/OPT5 down to near machine precision in the "nosurface"
+# control. See stages/opt_propagate.jl / stages/fd_propagate.jl.
+if !@isdefined(PLANEWAVE_EDGE_PIN_WIDTH)
+    const PLANEWAVE_EDGE_PIN_WIDTH = Ref(8)
+end
 
 DEV = parseDevArgs(@isdefined(DEV_ARGS) ? DEV_ARGS : ARGS;
     steps=["normal", "nosurface"], defaultStep="normal")

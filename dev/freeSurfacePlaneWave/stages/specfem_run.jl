@@ -2,9 +2,20 @@
 # Runs ONLY on a cache miss of specfem.jl; last expression is the Dict
 # saved. Builds a case directory, runs SPECFEM2D's own mesher+solver on it
 # (via run_specfem2d_case, which shells out to xmeshfem2D/xspecfem2D on
-# whatever machine this Julia process is running on), reads the receiver
-# traces, and integrates velocity -> displacement for comparison with the
-# FD3/OPT3/OPT5/analytical uz traces in compare.jl.
+# whatever machine this Julia process is running on), and reads the
+# receiver traces directly as DISPLACEMENT (seismotype=1, added
+# 2026-11-24 to src/specfemBenchmark.jl) for comparison with the
+# FD3/OPT3/OPT5/analytical uz traces in compare.jl. Previously this read
+# velocity (seismotype=2, the only option prepare_specfem2d_case/
+# find_specfem2d_traces supported at the time) and integrated it with a
+# plain trapezoidal cumulative sum to approximate displacement -- that
+# integration drifted (peak amplitude only ~20-40% of the true value, a
+# persistent nonzero "plateau" after the main arrival instead of
+# returning to zero), even though the TIME AXIS was independently
+# verified correct. Reading displacement directly removes the integration
+# (and its drift) entirely; nothing about the time-shift derivation below
+# changes; it was always about matching SPECFEM2D's own internal phase
+# convention, not about velocity vs displacement.
 
 caseDirectory = joinpath(flexopt_root, "data", "specfem2d_benchmarks",
     "planewave_$(DEV_STEP[])")
@@ -63,6 +74,7 @@ specfemCase = prepare_specfem2d_case(
     # injected plane-wave field itself, and our own planewaveAmplitude
     # convention is already O(1) in displacement units.
     source_factor=planewaveAmplitude,
+    seismotype=1,   # displacement, not velocity -- see the file header
     nx_elements=specfemNxElements, nz_elements=specfemNzElements,
     free_surface=applyFreeSurface,
     output_wavefield_dumps=false,
@@ -122,7 +134,7 @@ end
 # here, since v3 switched to the template's own built-in Ricker), so it
 # is always 0.0 on this path and this shift was never being applied --
 # which is why every trace looked like it arrived ~1.85s too early.
-verticalFiles = find_specfem2d_traces(specfemRun.output; component=:z)
+verticalFiles = find_specfem2d_traces(specfemRun.output; component=:z, seismotype=1)
 @assert length(verticalFiles) == length(observerDepths) "expected $(length(observerDepths)) traces, found $(length(verticalFiles)) in $(specfemRun.output)"
 # NOT 1.2/f0: that only re-anchors the FILE's own start-of-recording
 # label (SPECFEM2D's standard "give the Ricker's causal ramp-up room"
@@ -136,17 +148,8 @@ verticalFiles = find_specfem2d_traces(specfemRun.output; component=:z)
 # not 1.2/f0 at all (that number only ever described the file's own
 # internal start-of-recording bookkeeping, not our pulse convention).
 specfemTimeShift = sourceDelay
-specfemRawTracesZ = [read_specfem2d_trace(file;
+specfemTracesZ = [read_specfem2d_trace(file;
     time_shift=specfemTimeShift) for file in verticalFiles]
-
-function integrate_velocity_trace(trace)
-    displacement = zeros(Float64, length(trace.values))
-    displacement[2:end] .= cumsum(
-        ((trace.values[1:end-1] .+ trace.values[2:end]) ./ 2) .*
-        diff(trace.time))
-    (time=Float64.(trace.time), values=displacement)
-end
-specfemTracesZ = integrate_velocity_trace.(specfemRawTracesZ)
 
 solverLogText = read(joinpath(specfemCase.case_directory, "solver.log"), String)
 specfemCFLMatch = match(r"Max CFL stability condition[^=]*=\s*([0-9.Ee+-]+)",

@@ -31,8 +31,13 @@ fdOutputStride = max(1, round(Int, outputSampling / fd.dt))
 # the exact solution after every step keeps the edges honest regardless
 # of domain width -- nxHalfWidth does not need to be grown to outrun this
 # at the wave speed.
+if !@isdefined(PLANEWAVE_EDGE_PIN_WIDTH)
+    const PLANEWAVE_EDGE_PIN_WIDTH = Ref(1)
+end
+edgePinWidthFD = min(PLANEWAVE_EDGE_PIN_WIDTH[], size(fd.ux, 1) ÷ 2)
+edgeColumnsFD = vcat(1:edgePinWidthFD, (size(fd.ux, 1) - edgePinWidthFD + 1):size(fd.ux, 1))
 function pinLateralEdgesFD!()
-    for i in (1, size(fd.ux, 1)), k in 1:size(fd.ux, 2)
+    for i in edgeColumnsFD, k in 1:size(fd.ux, 2)
         fd.ux[i, k] = 0
         fd.uz[i, k] = fd.material[i, k] ? Float32(planeWaveUz(fdZ2D[i, k], fd.time)) : 0f0
     end

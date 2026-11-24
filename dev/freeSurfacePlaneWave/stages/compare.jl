@@ -1,7 +1,7 @@
 # dev/freeSurfacePlaneWave/stages/compare.jl
 analyticalFineTimes = collect(0.0:0.01:duration)
 analyticalResult = planeWaveNormalIncidenceP(analyticalFineTimes, observerDepths;
-    z0=z0, vp=vp0, amplitude=planewaveAmplitude, pulse=rickerSource,
+    z0=z0, vp=vp0, amplitude=planewaveAmplitude, pulse=pulseSource,
     include_image=applyFreeSurface)
 
 function _depth_trace(uz, zaxis, depth, timesAxis)

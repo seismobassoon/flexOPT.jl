@@ -29,7 +29,13 @@ zOPT = range(first(zOPTPhysical) - optPadding[1,2]*dxOPT; step=dxOPT, length=pre
 materialRowOPT = applyFreeSurface ? (collect(zOPT) .<= 0.0) : trues(length(zOPT))
 planeWaveRowOPT(iz, t) = materialRowOPT[iz] ? planeWaveUz(zOPT[iz], t) : 0.0
 
+if !@isdefined(PLANEWAVE_EDGE_PIN_WIDTH)
+    const PLANEWAVE_EDGE_PIN_WIDTH = Ref(1)
+end
+
 function propagateFreePlaneWave(prepared, Nt, dt; output_stride=1, blowup_limit=Inf, solver_name="OPT")
+    edgePinWidthOPT = min(PLANEWAVE_EDGE_PIN_WIDTH[], prepared.spaceShape[1] ÷ 2)
+    edgeColumnsOPT = vcat(1:edgePinWidthOPT, (prepared.spaceShape[1] - edgePinWidthOPT + 1):prepared.spaceShape[1])
     nKnownTime = prepared.timePointsUsedForOneStep - 1
     knownField = zeros(Float64, size(prepared.known_lhs_template))
     knownForce = zeros(Float64, size(prepared.known_rhs_template))   # identically zero: no forcing anywhere
@@ -71,7 +77,7 @@ function propagateFreePlaneWave(prepared, Nt, dt; output_stride=1, blowup_limit=
         # width, and only ever overwrites the two edge columns -- it
         # cannot mask or soften an interior/free-surface blowup.
         currentTime = step * dt
-        for ix in (1, prepared.spaceShape[1]), iz in 1:prepared.spaceShape[2]
+        for ix in edgeColumnsOPT, iz in 1:prepared.spaceShape[2]
             edgeIdx = linear[CartesianIndex(ix, iz)]
             unknownField[edgeIdx, 1] = 0.0
             unknownField[edgeIdx, 2] = planeWaveRowOPT(iz, currentTime)

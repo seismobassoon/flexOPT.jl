@@ -171,6 +171,7 @@ function prepare_specfem2d_case(
     source_factor=1.0e10,
     source_angle=0.0,
     source_type::Integer=1,
+    seismotype::Integer=2,
     moment_tensor=(Mxx=1.0, Mzz=-1.0, Mxz=0.0),
     source_time_function=nothing,
     receiver_z=maximum(surface_z isa Real ? [surface_z] : surface_z),
@@ -186,6 +187,9 @@ function prepare_specfem2d_case(
 )
     source_type in (1, 2) ||
         throw(ArgumentError("source_type must be 1 (force) or 2 (moment tensor)"))
+    seismotype in (1, 2, 3, 4) ||
+        throw(ArgumentError("seismotype must be 1 (displacement), 2 (velocity), " *
+            "3 (acceleration) or 4 (pressure)"))
     all(name -> hasproperty(moment_tensor, name), (:Mxx, :Mzz, :Mxz)) ||
         throw(ArgumentError("moment_tensor needs Mxx, Mzz and Mxz fields"))
     all(isfinite, Float64.((moment_tensor.Mxx, moment_tensor.Mzz,
@@ -238,7 +242,7 @@ function prepare_specfem2d_case(
         ("DT", string(dt)),
         ("MODEL", "default"),
         ("TOMOGRAPHY_FILE", "./DATA/$(basename(tomography_file))"),
-        ("seismotype", "2"),
+        ("seismotype", string(seismotype)),
         ("NTSTEP_BETWEEN_OUTPUT_SAMPLE", "1"),
         ("NTSTEP_BETWEEN_OUTPUT_IMAGES", string(snapshot_interval_steps)),
         ("output_color_image", ".true."),
@@ -581,21 +585,30 @@ function make_specfem2d_snapshot_video(
 end
 
 """
-    find_specfem2d_traces(output_directory; component=:z)
+    find_specfem2d_traces(output_directory; component=:z, seismotype=2)
 
-Return one SPECFEM2D ASCII velocity trace per station. SPECFEM uses different
-channel prefixes depending on the output convention (`CXZ`, `FXZ`, ...), so
-selection is based on the physical final component rather than a fixed prefix.
+Return one SPECFEM2D ASCII trace per station, in whatever physical quantity
+`seismotype` wrote (1=displacement/.semd, 2=velocity/.semv, 3=acceleration/
+.sema, 4=pressure/.semp -- must match the `seismotype` passed to
+`prepare_specfem2d_case`, since that is what determines which files SPECFEM2D
+actually writes). SPECFEM uses different channel prefixes depending on the
+output convention (`CXZ`, `FXZ`, ...), so selection is based on the physical
+final component rather than a fixed prefix.
 """
 function find_specfem2d_traces(
     output_directory;
     component::Symbol=:z,
+    seismotype::Integer=2,
     network::Union{Nothing,AbstractString}=nothing,
     stations::Union{Nothing,AbstractVector{<:AbstractString}}=nothing,
 )
     component in (:x, :z) ||
         throw(ArgumentError("SPECFEM2D component must be :x or :z"))
-    suffix = component === :x ? "XX.semv" : "XZ.semv"
+    seismotype_extension = Dict(1 => "semd", 2 => "semv", 3 => "sema", 4 => "semp")
+    haskey(seismotype_extension, seismotype) ||
+        throw(ArgumentError("seismotype must be 1 (displacement), 2 (velocity), " *
+            "3 (acceleration) or 4 (pressure)"))
+    suffix = (component === :x ? "XX." : "XZ.") * seismotype_extension[seismotype]
     paths = filter(
         path -> begin
             fields = split(basename(path), '.')

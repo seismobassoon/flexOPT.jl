@@ -10,6 +10,7 @@ optCacheParams = Dict{String,Any}(
     "cflFraction" => (@isdefined(PLANEWAVE_CFL_FRACTION) ? PLANEWAVE_CFL_FRACTION[] : 0.20),
     "boundaryWeight" => string(@isdefined(PLANEWAVE_BOUNDARY_WEIGHT) ? PLANEWAVE_BOUNDARY_WEIGHT[] : 1.0),
     "overlapMode" => string(@isdefined(PLANEWAVE_OVERLAP_MODE) ? PLANEWAVE_OVERLAP_MODE[] : :additive),
+    "edgePinWidth" => (@isdefined(PLANEWAVE_EDGE_PIN_WIDTH) ? PLANEWAVE_EDGE_PIN_WIDTH[] : 1),
 )
 optCachePrefix = "opt_planewave"
 devRedo!("opt", optCacheParams, PLANEWAVE_CACHE_DIR, optCachePrefix)

@@ -7,6 +7,7 @@ fdCacheParams = Dict{String,Any}(
         amplitude=planewaveAmplitude),
     "boundaries" => (cerjanCells=cerjanCells, damping=cerjan.damping),
     "vp0" => vp0, "vs0" => vs0, "rho0" => rho0,
+    "edgePinWidth" => (@isdefined(PLANEWAVE_EDGE_PIN_WIDTH) ? PLANEWAVE_EDGE_PIN_WIDTH[] : 1),
 )
 fdCachePrefix = "fd_planewave"
 devRedo!("fd", fdCacheParams, PLANEWAVE_CACHE_DIR, fdCachePrefix)
