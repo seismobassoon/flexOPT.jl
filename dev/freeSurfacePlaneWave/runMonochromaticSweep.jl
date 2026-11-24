@@ -152,22 +152,22 @@ for step in DEV.steps
         ylabel="max relative error (worst observer depth)", yscale=log10,
         title="$(step): monochromatic-sweep error vs resolution ($(monoCyclesSweep)-cycle Gabor burst)")
     ppwValues = [m.ppw for m in allMetrics]
-    lines!(axErr, ppwValues, [m.FD3.relative_error for m in allMetrics]; label="FD3", marker=:circle)
+    lines!(axErr, ppwValues, [m.FD3.relative_error for m in allMetrics]; label="FD3")
     scatter!(axErr, ppwValues, [m.FD3.relative_error for m in allMetrics])
-    lines!(axErr, ppwValues, [m.OPT3.relative_error for m in allMetrics]; label="OPT3", marker=:utriangle)
+    lines!(axErr, ppwValues, [m.OPT3.relative_error for m in allMetrics]; label="OPT3")
     scatter!(axErr, ppwValues, [m.OPT3.relative_error for m in allMetrics])
-    lines!(axErr, ppwValues, [m.OPT5.relative_error for m in allMetrics]; label="OPT5", linestyle=:dash, marker=:dtriangle)
+    lines!(axErr, ppwValues, [m.OPT5.relative_error for m in allMetrics]; label="OPT5", linestyle=:dash)
     scatter!(axErr, ppwValues, [m.OPT5.relative_error for m in allMetrics])
     vlines!(axErr, [minimumAcceptedPointsPerSWavelength]; color=:gray, linestyle=:dot, label="design limit (10 pts/λ)")
     axislegend(axErr; position=:rt)
 
     axAmp = Axis(summaryFigure[2,1]; xlabel="points per S-wavelength",
         ylabel="amplitude ratio (numerical/analytical, worst depth)")
-    lines!(axAmp, ppwValues, [m.FD3.amplitude_ratio for m in allMetrics]; label="FD3", marker=:circle)
+    lines!(axAmp, ppwValues, [m.FD3.amplitude_ratio for m in allMetrics]; label="FD3")
     scatter!(axAmp, ppwValues, [m.FD3.amplitude_ratio for m in allMetrics])
-    lines!(axAmp, ppwValues, [m.OPT3.amplitude_ratio for m in allMetrics]; label="OPT3", marker=:utriangle)
+    lines!(axAmp, ppwValues, [m.OPT3.amplitude_ratio for m in allMetrics]; label="OPT3")
     scatter!(axAmp, ppwValues, [m.OPT3.amplitude_ratio for m in allMetrics])
-    lines!(axAmp, ppwValues, [m.OPT5.amplitude_ratio for m in allMetrics]; label="OPT5", linestyle=:dash, marker=:dtriangle)
+    lines!(axAmp, ppwValues, [m.OPT5.amplitude_ratio for m in allMetrics]; label="OPT5", linestyle=:dash)
     scatter!(axAmp, ppwValues, [m.OPT5.amplitude_ratio for m in allMetrics])
     hlines!(axAmp, [1.0]; color=:gray, linestyle=:dot)
     axislegend(axAmp; position=:rt)
