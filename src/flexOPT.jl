@@ -44,8 +44,8 @@ module flexOPT
     # deriving symbolic and semi-symbolic OPT operators
     include("../src/compactSymbolicFunctions/compactFunctionsArray.jl")
     include("../src/compactSymbolicFunctions/BsplineHelpers.jl")
-    include("../src/CompactSymbolicFunctions/TaylorExpansionHelpers.jl")
-    include("../src/CompactSymbolicFunctions/integralWYYKK.jl")
+    include("../src/compactSymbolicFunctions/TaylorExpansionHelpers.jl")
+    include("../src/compactSymbolicFunctions/integralWYYKK.jl")
 
 
     # famous equations etc.
