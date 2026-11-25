@@ -102,7 +102,7 @@ swpcFactor, swpcLag = NaN, NaN
 if haskey(data["tilt0"], "specfem") && haskey(data["tilt0"], "swpc")
     ref, sw = data["tilt0"]["specfem"], data["tilt0"]["swpc"]
     tt = collect(0.0:0.01:GC.duration)
-    best = (Inf, 0.0, 0.0)
+    best = Ref((Inf, 0.0, 0.0))
     for lag in -0.6:0.005:0.6
         num, den, rr = 0.0, 0.0, 0.0
         for line in lineNames, ir in 1:nRec, comp in (:un, :ut)
@@ -114,9 +114,9 @@ if haskey(data["tilt0"], "specfem") && haskey(data["tilt0"], "swpc")
         end
         f = num / den
         misfit = rr - 2f * num + f^2 * den
-        misfit < best[1] && (best = (misfit, f, lag))
+        misfit < best[][1] && (best[] = (misfit, f, lag))
     end
-    global swpcFactor, swpcLag = best[2], best[3]
+    global swpcFactor, swpcLag = best[][2], best[][3]
     @printf("\nSeismicWavePC global calibration on tilt0 vs SPECFEM2D: factor %.4e, lag %+.3f s (applied to every case)\n",
         swpcFactor, swpcLag)
 else
