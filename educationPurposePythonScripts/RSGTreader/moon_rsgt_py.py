@@ -268,6 +268,25 @@ def synthetics_all_models(stla, stlo, evla, evlo, evdp, ids=None, catalogue=None
     return t, ids, np.array(data)
 
 
+def double_couple(strike, dip, rake, m0=1.0):
+    """GCMT moment tensor (dict mrr ... mtp, N.m if m0 is) of a double couple; angles in degrees."""
+    f, d, l = np.radians([strike, dip, rake])
+    return dict(mrr=m0 * np.sin(2 * d) * np.sin(l),
+                mtt=-m0 * (np.sin(d) * np.cos(l) * np.sin(2 * f) + np.sin(2 * d) * np.sin(l) * np.sin(f) ** 2),
+                mpp=m0 * (np.sin(d) * np.cos(l) * np.sin(2 * f) - np.sin(2 * d) * np.sin(l) * np.cos(f) ** 2),
+                mrt=-m0 * (np.cos(d) * np.cos(l) * np.cos(f) + np.cos(2 * d) * np.sin(l) * np.sin(f)),
+                mrp=m0 * (np.cos(d) * np.cos(l) * np.sin(f) - np.cos(2 * d) * np.sin(l) * np.cos(f)),
+                mtp=-m0 * (np.sin(d) * np.cos(l) * np.cos(2 * f) + 0.5 * np.sin(2 * d) * np.sin(l) * np.sin(2 * f)))
+
+
+def point_at(lat, lon, delta_deg, az_deg):
+    """(lat, lon) at distance delta_deg and azimuth az_deg (clockwise from north) from (lat, lon)."""
+    la, lo, d, a = np.radians([lat, lon, delta_deg, az_deg])
+    la2 = np.arcsin(np.sin(la) * np.cos(d) + np.cos(la) * np.sin(d) * np.cos(a))
+    lo2 = lo + np.arctan2(np.sin(a) * np.sin(d) * np.cos(la), np.cos(d) - np.sin(la) * np.sin(la2))
+    return float(np.degrees(la2)), float((np.degrees(lo2) + 180) % 360 - 180)
+
+
 if __name__ == "__main__":
     import sys
     mid = sys.argv[1] if len(sys.argv) > 1 else model_ids()[0]
