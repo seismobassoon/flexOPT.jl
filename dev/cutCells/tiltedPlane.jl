@@ -20,6 +20,7 @@
 # recomputes. ENV FLEXOPT_TILT_DX changes Δx (500 m default).
 
 include(joinpath(@__DIR__, "env.jl"))
+include(joinpath(@__DIR__, "geometryCases.jl"))
 using LinearAlgebra, StaticArrays, Statistics
 
 const TP = (vp=6000.0, vs=3464.0, rho=2700.0, halfWidth=60e3, voidCapCells=3, duration=9.0,
@@ -63,25 +64,16 @@ function bilinearTrace(history, x, z, field, p)
     return Float64.(values), nodes
 end
 
-function runTiltedPlane(θdeg; freeSurface::Bool=true)
-    θ = deg2rad(θdeg)
-    t̂ = SVector(cos(θ), sin(θ))
-    n̂ = SVector(-sin(θ), cos(θ))
-    toGrid(xp, zp) = xp * t̂ + zp * n̂
+function runTiltedPlane(case)
+    θdeg = caseTheta(case)
+    freeSurface = hasFreeSurface(case)
     dx, dt = dxTilt, dtTilt
-    sx, sz = TP.sourceFlat
-    W = TP.halfWidth
-    # without a free surface (control: grid anisotropy only) the box extends 20 km above the plane
-    top = freeSurface ? TP.voidCapCells * dx : 20e3
-    corners = [toGrid(a, b) for a in (sx - W, sx + W), b in (sz - W, top)]
-    lo(d) = floor(minimum(c[d] for c in corners) / dx) * dx
-    hi(d) = ceil(maximum(c[d] for c in corners) / dx) * dx
-    x = collect(lo(1):dx:hi(1))
-    z = collect(lo(2):dx:hi(2))
+    x, z = caseGrid(case, dx)
     nx, nz = length(x), length(z)
     println("  grid $(nx) × $(nz), Δx = $dx m, Δt = $(round(dt; sigdigits=4)) s")
 
-    ls = flexOPT.levelSetFromFunction(r -> freeSurface ? dot(n̂, r) : -1.0, (x, z))
+    φ = casePhi(case)
+    ls = flexOPT.levelSetFromFunction(r -> φ(r[1], r[2]), (x, z))
     geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme2D.maxDegree, zigzag=(CUT_GEOMETRY == "zigzag"))
     solid = flexOPT.sideMask(geom.levelSet)          # zigzag: the staircase nodes
     cut = flexOPT.cutNodes(geom)
@@ -100,7 +92,7 @@ function runTiltedPlane(θdeg; freeSurface::Bool=true)
     models = [rhoS, lambdaS, muS]
     timeMarching = recipe2D["recette"].numbersOfTheSystem.numbersOfTheSystemL.timeMarching
     family = (models=models, modelPoints=getModelPoints(models[1], 3, timeMarching),
-        Δ=(1.0, 1.0, 1.0), modelName="cutcells_tilt$(round(Int, θdeg))_dx$(round(Int, dx))")
+        Δ=(1.0, 1.0, 1.0), modelName="cutcells_$(case)_dx$(round(Int, dx))")
     numerical = numericalOperatorConstruction(Dict{String,Any}(
         "optRec" => recipe2D, "modelFam" => family, "absorbingBoundaries" => nothing,
         "maskedRegionInSpace" => nothing, "boundaryConditions" => nothing,
@@ -108,7 +100,7 @@ function runTiltedPlane(θdeg; freeSurface::Bool=true)
     volume = prepareLinearSystem(numerical)
     volume.spaceShape == (nx, nz) || error("operator grid $(volume.spaceShape) differs from ($nx, $nz)")
 
-    src = toGrid(sx, sz)
+    src = SVector(caseSource(case)...)
     probe = CartesianIndex(argmin(abs.(x .- src[1])), argmin(abs.(z .- src[2])))
     selfCheck = flexOPT.cutCellSelfCheck(scheme2D, volume, models, probe)
     @show selfCheck
@@ -118,11 +110,10 @@ function runTiltedPlane(θdeg; freeSurface::Bool=true)
     system = freeSurface ?
         flexOPT.pinRows(flexOPT.applyAggregation(flexOPT.installRows(volume, rows), aggregation), farVoid) : volume
 
-    # source: Gaussian weights around the rotated source point, force along n̂
-    specs = [(I, exp(-sum(abs2, SVector(x[I[1]], z[I[2]]) - src) / (2TP.sigma^2)))
-             for I in CartesianIndices((nx, nz)) if norm(SVector(x[I[1]], z[I[2]]) - src) <= TP.cutoff * TP.sigma]
-    total = sum(last, specs)
-    all(solid[first(s)] for s in specs) || error("source touches the void")
+    # source: Gaussian weights around the source point, force along caseForce
+    specs = caseSourceWeights(case, x, z)
+    all(solid[i, k] for (i, k, _) in specs) || error("source touches the void")
+    force = caseForce(case)
     steps = ceil(Int, TP.duration / dt)
     nPast = system.timePointsUsedForOneStep - 1
     sourceTimes = ((1-nPast):steps) .* dt
@@ -130,14 +121,14 @@ function runTiltedPlane(θdeg; freeSurface::Bool=true)
     scale = TP.force * dt^2 / (TP.rho * dx^2)
     source = zeros(system.NforcePoints, system.NForceField, length(sourceTimes))
     linear = LinearIndices((nx, nz))
-    for (I, w) in specs
-        source[linear[I], 1, :] .+= (w / total) * scale * n̂[1] .* wavelet
-        source[linear[I], 2, :] .+= (w / total) * scale * n̂[2] .* wavelet
+    for (i, k, w) in specs
+        source[linear[i, k], 1, :] .+= w * scale * force[1] .* wavelet
+        source[linear[i, k], 2, :] .+= w * scale * force[2] .* wavelet
     end
     stride = max(1, round(Int, TP.outputSampling / dt))
     marchTime = @elapsed propagation = propagateLinearSystem(system, steps, dt; sourceFull=source,
-        output_stride=stride, blowup_limit=1e8, solver_name="$(CUT_VARIANT) tilt $(θdeg)°", scheme=:direct)
-    propagation.stopped_early && error("propagation stopped early (blow-up) at θ = $θdeg°")
+        output_stride=stride, blowup_limit=1e8, solver_name="$(CUT_VARIANT) $(case)", scheme=:direct)
+    propagation.stopped_early && error("propagation stopped early (blow-up) for $case")
     println("  propagation: $(round(marchTime; digits=1)) s")
     history = propagation.history                 # (nx, nz, 2, nt)
 
@@ -146,39 +137,47 @@ function runTiltedPlane(θdeg; freeSurface::Bool=true)
              if solid[I] && (I[1] in (1, nx) || I[2] in (1, nz))]
     start = delayTilt - 1 / fTilt
     traces = Dict{String,Any}()
-    for (line, zp) in pairs(TP.lines), (ir, xp) in enumerate(TP.receiversX)
-        p = toGrid(xp, zp)
+    for (line, points) in caseReceivers(case), (ir, pt) in enumerate(points)
+        p = SVector(pt...)
         ux, nodesUsed = bilinearTrace(history, x, z, 1, p)
         uz, _ = bilinearTrace(history, x, z, 2, p)
-        all(solid[I] for I in nodesUsed) || error("receiver $(line) $(xp) interpolates from the void")
+        all(solid[I] for I in nodesUsed) || error("receiver $(line) $(ir) interpolates from the void")
         tReturn = start + minimum(norm(src - e) + norm(e - p) for e in edges) / TP.vp
-        traces["$(line)_$(ir)"] = (x_km=xp / 1e3, line=String(line),
-            ut=ux .* cos(θ) .+ uz .* sin(θ), un=-ux .* sin(θ) .+ uz .* cos(θ), tReturn=tReturn)
+        ut, un = caseRotate(case, ux, uz)
+        traces["$(line)_$(ir)"] = (x_km=TP.receiversX[ir] / 1e3, line=String(line), ut=ut, un=un, tReturn=tReturn)
     end
     Dict{String,Any}("theta" => θdeg, "times" => Float64.(propagation.times), "traces" => traces,
         "selfCheck" => selfCheck, "nCut" => length(cut), "nMerged" => nMerged,
         "nExtended" => length(aggregation) - nMerged, "rowsTime" => rowsTime, "marchTime" => marchTime)
 end
 
-tiltCases = filter(c -> startswith(c, "tilt") || startswith(c, "full"), DEV.cases)
+"Cache parameters of a flexOPT topography run (unchanged keys for the tilt cases)."
+function topoCacheParams(case)
+    params = Dict{String,Any}("stage" => "tiltedPlane", "theta" => caseTheta(case), "dx" => dxTilt,
+        "halfWidth" => TP.halfWidth, "duration" => TP.duration, "extension" => String(CUT_EXTENSION),
+        "codeVersion" => TILT_CODE_VERSION)
+    hasFreeSurface(case) || (params["freeSurface"] = false)     # key only for the control, so tilt* caches stay valid
+    caseKind(case) == :hill && (params["case"] = "hill")
+    CUT_SCHEME == "OPT3" || (params["scheme"] = CUT_SCHEME)
+    CUT_GEOMETRY == "cut" || (params["geometry"] = CUT_GEOMETRY)
+    params
+end
+
+allCases = filter(c -> startswith(c, "tilt") || startswith(c, "full") || c == "hill", DEV.cases)
+tiltCases = filter(c -> c != "hill", allCases)
 for ref in unique(referenceOf.(tiltCases))
     ref in tiltCases || pushfirst!(tiltCases, ref)
 end
 resultsTilt = Dict{String,Any}()
-for case in tiltCases
-    θdeg = thetaOfCase(case)
-    freeSurface = startswith(case, "tilt")
-    println("\n== ", freeSurface ? "tilted plane" : "no free surface (control)", ", θ = $(θdeg)°")
-    params = Dict{String,Any}("stage" => "tiltedPlane", "theta" => θdeg, "dx" => dxTilt,
-        "halfWidth" => TP.halfWidth, "duration" => TP.duration, "extension" => String(CUT_EXTENSION),
-        "codeVersion" => TILT_CODE_VERSION)
-    freeSurface || (params["freeSurface"] = false)     # key only for the control, so tilt* caches stay valid
-    CUT_SCHEME == "OPT3" || (params["scheme"] = CUT_SCHEME)
-    CUT_GEOMETRY == "cut" || (params["geometry"] = CUT_GEOMETRY)
+for case in vcat(tiltCases, filter(==("hill"), allCases))
+    println("\n== $(CUT_VARIANT): ", caseKind(case) == :hill ? "Gaussian hill" :
+        hasFreeSurface(case) ? "tilted plane, θ = $(caseTheta(case))°" : "no free surface (control), θ = $(caseTheta(case))°")
+    params = topoCacheParams(case)
     devRedo!("tilt", params, "dev/cutCells", "tiltedPlane")
-    resultsTilt[case] = myProduceOrLoad(cfg -> runTiltedPlane(θdeg; freeSurface=freeSurface), params, "dev/cutCells", "tiltedPlane")
+    resultsTilt[case] = myProduceOrLoad(cfg -> runTiltedPlane(case), params, "dev/cutCells", "tiltedPlane")
 end
 
+if !isempty(tiltCases)   # tilted-plane self-comparison (the hill is compared in compareAll.jl)
 # ------------------------------------------------------------- comparison
 # errors are normalised by the size of the WHOLE reference displacement at the receiver (both
 # components), so a component that is ~0 by symmetry (u_t above the source) does not blow up
@@ -274,3 +273,4 @@ for line in ("deep", "shallow")
     devSave(fig, CUT_VARIANT == "OPT3" ? "tilted_plane_$(line)" : "tilted_plane_$(CUT_VARIANT)_$(line)")
 end
 println("\n(dotted lines: end of the comparison window, first return from an artificial grid edge)")
+end
