@@ -201,7 +201,7 @@ for case in allCases
     sub = "black: $refName.  Raw displacement, one scale per line for every code" *
         (isnan(swpcFactor) ? "" : @sprintf("; SeismicWavePC × %.3e, lag %+.3f s (global, tilt0)", swpcFactor, swpcLag)) *
         (case == "tilt0" ? ".  At θ = 0 cut-cell = zigzag (same run)." : "") *
-        (isempty(missingCodes[case]) ? "" : "\nMISSING (no cache): " * join(missingCodes[case], ", "))
+        (isempty(missingCodes[case]) ? "" : "\nMISSING (not run, or blew up -- zigzag): " * join(missingCodes[case], ", "))
     fig = Figure(size=(2300, 1300))
     Label(fig[0, 1:4], title; fontsize=17, font=:bold)
     Label(fig[1, 1:4], sub; fontsize=12)

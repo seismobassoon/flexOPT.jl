@@ -247,5 +247,16 @@ Raw relative L2 (mean over a line) against SPECFEM2D:
   the shallow line.
 * The tilted SPECFEM2D runs made before 25 Nov 15:50 used `anglesource = +θ` (pitfall 1)
   and are being redone; tilt10/20/30 against the flat reference will follow.
-* OPT5 zigzag at 10° stops at the first time step (singular system); under investigation.
-  OPT5 tilt20/30 and the hill are still to run.
+* **Zigzag blow-ups are reported as results, not fixed.** OPT5 zigzag at 10° stopped at the
+  first time step: the LU bug below. Any zigzag case that still blows up after the fix is
+  listed as such in the tables and not tuned further. The cut-cell versions are the ones
+  that must run.
+* **OPT5 blow-ups fixed (25 Nov, 17:00): they were a linear-algebra bug, not an instability.**
+  The equations (rows) were numbered point-major and the unknowns (columns) field-major.
+  On these matrices UMFPACK's sparse LU then returns garbage (relative residual 1e13–1e15)
+  although the matrix is full rank and well conditioned (sparse QR solves it to 1e-15).
+  `tiltedPlane.jl` now renumbers the rows (`alignRows`, same equations) and checks the LU
+  residual of every run (printed, about 1e-15). With it, OPT5 cut-cell runs at tilt20, tilt30 and the
+  hill. **OPT5 results computed before this fix (including tilt0) must be recomputed**, since a bad factorization can
+  pollute a run without blowing it up. The same renumbering is worth adding in
+  `src/numSolvers` (`prepareConstantMatrix`) for every flexOPT user; not done yet.
