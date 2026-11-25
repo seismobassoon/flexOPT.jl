@@ -19,7 +19,7 @@
 # Nothing in src/ is modified: the two entries are new methods of
 # flexOPT.famousEquation, as in dev/spherical1Delastic/lib.
 
-using LinearAlgebra, Printf
+using Symbolics, LinearAlgebra, Printf
 
 # ---------------------------------------------------------------------------
 # the two "cooking" entries (coordinate x from commonBatchs)
