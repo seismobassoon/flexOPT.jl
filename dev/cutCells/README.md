@@ -255,8 +255,9 @@ Raw relative L2 (mean over a line) against SPECFEM2D:
   The equations (rows) were numbered point-major and the unknowns (columns) field-major.
   On these matrices UMFPACK's sparse LU then returns garbage (relative residual 1e13–1e15)
   although the matrix is full rank and well conditioned (sparse QR solves it to 1e-15).
-  `tiltedPlane.jl` now renumbers the rows (`alignRows`, same equations) and checks the LU
-  residual of every run (printed, about 1e-15). With it, OPT5 cut-cell runs at tilt20, tilt30 and the
-  hill. **OPT5 results computed before this fix (including tilt0) must be recomputed**, since a bad factorization can
-  pollute a run without blowing it up. The same renumbering is worth adding in
-  `src/numSolvers` (`prepareConstantMatrix`) for every flexOPT user; not done yet.
+  The fix is in `src/numSolvers/linearSolution.jl`: `prepareConstantMatrix` factorises
+  multi-field sparse systems with the rows renumbered (`RowAlignedLU`, same equations),
+  for every flexOPT user. `tiltedPlane.jl` prints the LU residual of every run (about 1e-15)
+  and stops if it is not small. With the fix, OPT5 cut-cell runs at tilt20, tilt30 and the
+  hill. **Results computed before this fix (including OPT5 tilt0) must be recomputed**
+  (`--redo=tilt`), since a bad factorization can pollute a run without blowing it up.

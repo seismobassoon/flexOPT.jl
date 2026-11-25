@@ -65,30 +65,21 @@ function bilinearTrace(history, x, z, field, p)
 end
 
 """
-    alignRows(prepared)
+    checkFactorization(prepared)
 
-Renumber the equations (rows of A_unknown, L_known, R_force) from point-major,
-row = (point - 1)·NField + field, to the field-major order of the unknowns,
-column = point + (field - 1)·NpointsSpace, so that each node's own coefficient sits
-on the diagonal. Nothing else changes (same equations). UMFPACK's sparse LU fails on
-these systems in the original order -- relative residual 1e13-1e15 for flat OPT5 and
-for the tilted cut-cell/zigzag cases, which is what made OPT5 tilt20 (cut) and tilt10
-(zigzag) blow up -- and is exact (1e-15) after the renumbering (found 2026-11-25).
-Prints the residual of one solve with a random right-hand side as a check.
+Residual of one solve with the factor the solver will use
+(`flexOPT.prepareConstantMatrix`, which renumbers the equations of multi-field
+sparse systems since 2026-11-25: UMFPACK's LU of the original point-major ordering
+returned garbage, relative residual 1e13-1e15, which made OPT5 tilt20 (cut) and
+tilt10 (zigzag) blow up). Errors if the residual is not small.
 """
-function alignRows(prepared)
-    NF, NP = prepared.NField, prepared.NpointsSpace
-    p = Vector{Int}(undef, NF * NP)
-    for lp in 1:NP, f in 1:NF
-        p[lp+(f-1)*NP] = (lp - 1) * NF + f
-    end
-    A = prepared.A_unknown[p, :]
-    aligned = flexOPT._prepared_with_matrices(prepared, A, prepared.L_known[p, :], prepared.R_force[p, :])
+function checkFactorization(prepared)
+    A, F = flexOPT.prepareConstantMatrix(prepared; sparse_output=true)
     b = randn(size(A, 1))
-    residual = norm(A * (lu(A) \ b) - b) / norm(b)
-    println("  linear system: rows aligned with the unknowns; LU check residual = ", round(residual; sigdigits=2))
-    residual < 1e-8 || error("sparse LU still inaccurate after aligning the rows (residual $residual)")
-    aligned
+    residual = norm(A * (F \ b) - b) / norm(b)
+    println("  linear system: LU check residual = ", round(residual; sigdigits=2))
+    residual < 1e-8 || error("sparse LU inaccurate (residual $residual)")
+    prepared
 end
 
 function runTiltedPlane(case)
@@ -136,7 +127,7 @@ function runTiltedPlane(case)
     println("  cut-cell rows: $(round(rowsTime; digits=1)) s")
     system = freeSurface ?
         flexOPT.pinRows(flexOPT.applyAggregation(flexOPT.installRows(volume, rows), aggregation), farVoid) : volume
-    system = alignRows(system)
+    checkFactorization(system)
 
     # source: Gaussian weights around the source point, force along caseForce
     specs = caseSourceWeights(case, x, z)

@@ -675,9 +675,48 @@ function materializeConstantMatrix(preparedLin;
     return A
 end
 
+"""
+    RowAlignedLU(F, p)
+
+LU factor of `A[p, :]`, used as a factor of `A` itself: `F \\ b` returns `A \\ b`.
+Built by `prepareConstantMatrix` for multi-field sparse systems, see there.
+"""
+struct RowAlignedLU{TF}
+    F::TF
+    p::Vector{Int}
+end
+Base.:\(f::RowAlignedLU, b::AbstractVector) = f.F \ b[f.p]
+LinearAlgebra.ldiv!(x::AbstractVector, f::RowAlignedLU, b::AbstractVector) = (x .= f.F \ b[f.p]; x)
+
+"""
+    equationAlignment(preparedLin, n)
+
+Row permutation that renumbers the equations from point-major,
+row = (point - 1)·NField + field, to the field-major order of the unknowns,
+column = point + (field - 1)·NpointsSpace, or `nothing` when it does not apply
+(one field, or sizes that do not match).
+"""
+function equationAlignment(preparedLin, n)
+    (hasproperty(preparedLin, :NField) && hasproperty(preparedLin, :NpointsSpace)) || return nothing
+    NF, NP = preparedLin.NField, preparedLin.NpointsSpace
+    (NF > 1 && NF * NP == n) || return nothing
+    p = Vector{Int}(undef, n)
+    for lp in 1:NP, f in 1:NF
+        p[lp+(f-1)*NP] = (lp - 1) * NF + f
+    end
+    p
+end
+
+# Multi-field sparse systems are factorised with their equations renumbered so that
+# each node's own coefficient sits on the diagonal (same equations, same solution).
+# UMFPACK's LU of the original point-major ordering can fail silently: relative
+# residual 1e13-1e15 on well-conditioned 2-D elastic OPT5 systems (flat and cut-cell),
+# 1e-15 after renumbering (found 2026-11-25, dev/cutCells/README.md).
 function prepareConstantMatrix(preparedLin; kwargs...)
     A = materializeConstantMatrix(preparedLin; kwargs...)
-    return A, lu(A)
+    p = A isa SparseMatrixCSC ? equationAlignment(preparedLin, size(A, 1)) : nothing
+    isnothing(p) && return A, lu(A)
+    return A, RowAlignedLU(lu(A[p, :]), p)
 end
 
 """

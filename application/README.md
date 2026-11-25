@@ -74,7 +74,7 @@ benchmarked in `dev/` (it works, but its options and outputs may change);
 | [`Neutrino_Earth/`](Neutrino_Earth/) | 3-flavour neutrino oscillations through a planet (flux, cross sections, detector) | — | notebook (see its README) |
 | [`Sonification/`](Sonification/) | turns any trace into a WAV file (an *output*, not an equation) | default demo, or your own trace | **ready** |
 | [`Outputs_1D/`](Outputs_1D/) | derived quantities (strain, stress, flux…) chosen by the user as PDE expressions and cooked with OPT recipes, vs FD | `compare`, `convergence`, `custom`, `examples.jl` | **new** (output recipes, 1-D) |
-| [`forBoris/`](forBoris/) | 2-D elastic point force AND normal-incidence plane wave, flat free surface, homogeneous half-space (OPT3/OPT5 only, no SPECFEM2D/FD3) | `run`, `runPlaneWave` | via `dev/freeSurfacePointSource`, `dev/freeSurfacePlaneWave` |
+| [`../dev/cutCells/`](../dev/cutCells/README.md) | benchmarks for external codes (ex-`forBoris/`): 2-D elastic point force with flat, tilted and Gaussian-hill free surfaces; full setup in its README | `run.jl`, `specfemCases.jl`, `seismicWavePCCases.jl`, `compareAll.jl` | flat point force / plane wave also in `dev/freeSurfacePointSource`, `dev/freeSurfacePlaneWave` |
 
 Not yet wrapped here (open the notebook directly):
 
