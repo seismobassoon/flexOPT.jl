@@ -38,6 +38,7 @@ julia --project=. application/Outputs_1D/run.jl                              # c
 julia --project=. application/Outputs_1D/run.jl compare name=mixed G=6
 julia --project=. application/Outputs_1D/run.jl convergence                  # G = 4 … 32
 julia --project=. application/Outputs_1D/run.jl custom expr="a*∂x(∂x(u))+b*∂x(u)"
+julia --project=. -e 'include("application/Outputs_1D/examples.jl")'   # four worked examples
 ```
 
 `custom`: field `u`, materials `a`, `b`, `c` (= 2 + sin(x/3), 1 + cos(x/5)/2, 1.5; at least one

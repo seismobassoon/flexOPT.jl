@@ -73,7 +73,7 @@ benchmarked in `dev/` (it works, but its options and outputs may change);
 | [`RayTheory/`](RayTheory/) | rays (Hamiltonian), 1-D spherical and 2-D/3-D Cartesian, isotropic and anisotropic, TauP-like phase names | `check`, `s1`, `s2`, `s3` | via `dev/raytheory` |
 | [`Neutrino_Earth/`](Neutrino_Earth/) | 3-flavour neutrino oscillations through a planet (flux, cross sections, detector) | — | notebook (see its README) |
 | [`Sonification/`](Sonification/) | turns any trace into a WAV file (an *output*, not an equation) | default demo, or your own trace | **ready** |
-| [`Outputs_1D/`](Outputs_1D/) | derived quantities (q = a ∂x u) declared like famous equations and cooked with OPT recipes, vs Fornberg FD | `compare`, `convergence` | **new** (step 1 of the output recipes) |
+| [`Outputs_1D/`](Outputs_1D/) | derived quantities (strain, stress, flux…) chosen by the user as PDE expressions and cooked with OPT recipes, vs FD | `compare`, `convergence`, `custom`, `examples.jl` | **new** (output recipes, 1-D) |
 | [`forBoris/`](forBoris/) | 2-D elastic point force AND normal-incidence plane wave, flat free surface, homogeneous half-space (OPT3/OPT5 only, no SPECFEM2D/FD3) | `run`, `runPlaneWave` | via `dev/freeSurfacePointSource`, `dev/freeSurfacePlaneWave` |
 
 Not yet wrapped here (open the notebook directly):
@@ -89,6 +89,23 @@ Not yet wrapped here (open the notebook directly):
 | small course on inverse theory | `notebooks/smallCourseInverseTheory.ipynb` |
 
 ---
+
+### Example: choose your own output expression (`Outputs_1D/`)
+
+The field u is not always what you want. Write the quantity you need as a PDE expression and
+flexOPT cooks it with the same OPT machinery as the operators:
+
+```julia
+julia> include("application/Outputs_1D/run.jl")
+julia> registerOutput!("stress", (u, μ) -> μ * ∂x(u))                     # q = μ ∂x u
+julia> r = outputs1DCompare("stress"; G=6.0); r.err                        # accuracy vs exact, all schemes
+julia> registerOutput!("curvature", (u, a, b) -> a * ∂x(∂x(u)) + b * ∂x(u))
+julia> lumped, consistent = cookOutput("stress", uvals, [μvals], Δx; scheme="OPT3", mass="Gal3")
+```
+
+From a terminal: `julia --project=. application/Outputs_1D/run.jl custom expr="a*∂x(∂x(u))+b*∂x(u)"`.
+More in `Outputs_1D/examples.jl` and `Outputs_1D/README.md`.
+
 
 ## 4. How every application is organised
 
