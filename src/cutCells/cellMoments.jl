@@ -111,7 +111,7 @@ fullCellMoments(N::Int, p::Int) =
     [prod(1.0 / I[d] for d in 1:N) for I in CartesianIndices(ntuple(_ -> p + 1, N))]
 
 """
-    CutCellGeometry(ls; maxDegree=4, tolerance=1e-12)
+    CutCellGeometry(ls; maxDegree=4, tolerance=1e-12, zigzag=false)
 
 Cell-by-cell description of the interface `ls` (a `CutLevelSet`):
 
@@ -120,6 +120,11 @@ Cell-by-cell description of the interface `ls` (a `CutLevelSet`):
 * `state[c]`     0 = entirely "+", 1 = entirely "−", 2 = cut
 * `moments[c]`   "−"-side moments (tensor degree `maxDegree`) of every cut
   cell; the "+" side is `fullCellMoments - moments[c]`.
+
+With `zigzag=true` the interface is replaced by its stair-step version
+(`zigzagLevelSet`): no cut cells, and `levelSet` is the stair-step level set,
+so `sideMask(geom.levelSet)` gives the material nodes of the staircase. The
+same operators then give the classical zigzag free surface, for comparison.
 """
 struct CutCellGeometry{N}
     levelSet::CutLevelSet{N}
@@ -129,7 +134,34 @@ struct CutCellGeometry{N}
     moments::Dict{CartesianIndex{N},Array{Float64,N}}
 end
 
-function CutCellGeometry(ls::CutLevelSet{N}; maxDegree::Int=4, tolerance::Float64=1e-12) where {N}
+"""
+    zigzagLevelSet(ls)
+
+Stair-step ("zigzag") version of the interface: a cell is material iff its
+2^N corners all have φ <= 0, a node is material iff it is a corner of such a
+cell. Returns a level set with the same |φ| (so normals stay close to the
+true ones) and the sign of that node classification.
+"""
+function zigzagLevelSet(ls::CutLevelSet{N}) where {N}
+    raw = ls.φ .<= 0.0
+    cellsShape = size(ls.φ) .- 1
+    corners = CartesianIndices(ntuple(_ -> 0:1, N))
+    solid = falses(size(ls.φ))
+    for c in CartesianIndices(cellsShape)
+        all(raw[c + k] for k in corners) || continue
+        for k in corners
+            solid[c + k] = true
+        end
+    end
+    tiny = 1e-12 * maximum(ls.spacing)
+    φ = [solid[I] ? -max(abs(ls.φ[I]), tiny) : max(abs(ls.φ[I]), tiny) for I in CartesianIndices(ls.φ)]
+    CutLevelSet(φ, ls.axes)
+end
+
+function CutCellGeometry(ls0::CutLevelSet{N}; maxDegree::Int=4, tolerance::Float64=1e-12,
+                         zigzag::Bool=false) where {N}
+    # zigzag = true: stair-step surface, every cell entirely material or entirely void
+    ls = zigzag ? zigzagLevelSet(ls0) : ls0
     cellsShape = size(ls.φ) .- 1
     fraction = zeros(Float64, cellsShape)
     state = zeros(Int8, cellsShape)
@@ -140,7 +172,7 @@ function CutCellGeometry(ls::CutLevelSet{N}; maxDegree::Int=4, tolerance::Float6
         if all(<=(0.0), φc)
             fraction[c] = 1.0
             state[c] = 1
-        elseif all(>(0.0), φc)
+        elseif zigzag || all(>(0.0), φc)
             state[c] = 0
         else
             m = cellMoments(φc, maxDegree)

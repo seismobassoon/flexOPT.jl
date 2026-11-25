@@ -57,7 +57,24 @@ function _recipe_backend_name(recipe_backend)
     return Symbol(lowercase(string(nameof(typeof(recipe_backend)))))
 end
 
+"""
+    TaylorOptions(itplParams, supplementaryOrder)
+
+Pack the Taylor-expansion options for the field (`fieldItpl`) or the material
+(`materItpl`).
+
+FROZEN (Nov. 2026): only the single-centre expansion (`ptsSpace = ptsTime = 1`)
+is supported. The multi-centre "interpolated Taylor expansion" (several centres
+μ blended with B-splines Y_μ, `ptsSpace > 1` or `ptsTime > 1`) is kept so old
+notebooks still run, but it is not maintained: once the stencil values fix the
+polynomial, multi-centre expansions span the same space as a single-centre one
+and bring no new freedom; the error structure is better controlled through the
+test functions W. Use mixed W instead.
+"""
 function TaylorOptions(itplParams,supplementaryOrder)
+    if itplParams.ptsSpace > 1 || itplParams.ptsTime > 1
+        @warn "Multi-centre interpolated Taylor expansion (ptsSpace/ptsTime > 1) is frozen and unsupported; use the single-centre expansion (ptsSpace = ptsTime = 1)" ptsSpace=itplParams.ptsSpace ptsTime=itplParams.ptsTime maxlog=1
+    end
     options=(YorderBspace=itplParams.YorderBspace,YorderBtime=itplParams.YorderBtime,supplementaryOrder=supplementaryOrder,pointsμInSpace=itplParams.ptsSpace,pointsμInTime=itplParams.ptsTime,offsetμInΔyInSpace=itplParams.offsetSpace,offsetμInΔyInTime=itplParams.offsetTime)
     return options
 end
@@ -126,7 +143,14 @@ _public_variational_form(form::Symbol) =
     form === :natural_weak ? :weak : :strong
 
 function makeOPTsemiSymbolic(params::Dict)
-    @unpack famousEquationType, Δ, orderBtime, orderBspace, pointsInSpace, pointsInTime, supplementaryOrder, fieldItpl, materItpl = params
+    @unpack famousEquationType, Δ, orderBtime, orderBspace, pointsInSpace, pointsInTime, supplementaryOrder = params
+    # fieldItpl/materItpl are optional: default = single-centre expansion
+    # (the multi-centre option is frozen, see TaylorOptions)
+    singleCentreItpl = (ptsSpace=1, ptsTime=1,
+        offsetSpace=(pointsInSpace - 1) / 2, offsetTime=1,
+        YorderBspace=-1, YorderBtime=1)
+    fieldItpl = _opt_paramget(params, :fieldItpl, singleCentreItpl)
+    materItpl = _opt_paramget(params, :materItpl, fieldItpl)
     # resolved below, once the number of coordinates of the equation is known
     recipe_backend_spec = _opt_paramget(params, :recipe_backend, _opt_paramget(params, :coefficient_backend, :auto))
     nuGeometryMode = Symbol(_opt_paramget(params, :nuGeometryMode, :middle))

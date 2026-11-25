@@ -7,7 +7,8 @@
 #
 # Step `tiltedPlane` (stage 2, 2-D): the validated flat point-force benchmark
 # rotated by θ on the same Cartesian grid (tiltedPlane.jl); cases tilt0
-# (reference, always run) tilt10 tilt20 tilt30 (default) tilt45.
+# (reference, always run) tilt10 tilt20 tilt30 (default) tilt45; control without
+# free surface (grid anisotropy only): full0 (its reference) full10 ... full45.
 #
 # Step `geometry` (stage 1): exactness of the simplex rules, cut-cell moments
 # against closed forms in 1-D/2-D/3-D, convergence of circle/sphere areas,
@@ -47,7 +48,8 @@ cutCells(args...) = (global APP_ARGS = collect(String, string.(args)); include(j
 
 DEV = parseDevArgs(@isdefined(APP_ARGS) ? APP_ARGS : ARGS; steps=["geometry", "freeEnd1D", "tiltedPlane"],
     defaultStep="geometry",
-    cases=["eta0", "eta025", "eta05", "eta075", "tilt0", "tilt10", "tilt20", "tilt30", "tilt45"],
+    cases=["eta0", "eta025", "eta05", "eta075", "tilt0", "tilt10", "tilt20", "tilt30", "tilt45",
+        "full0", "full10", "full20", "full30", "full45"],
     defaultCases=["eta0", "eta025", "eta05", "eta075", "tilt0", "tilt10", "tilt20", "tilt30"])
 DEV_OUTPUT_DIR[] = joinpath(@__DIR__, "outputs")
 

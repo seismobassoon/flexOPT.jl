@@ -33,6 +33,6 @@ export levelSetFromPointsNormals, interfaceFromLocalCoords
 export levelSetValue, levelSetNormal, nodeCoordinates, sideMask
 export grundmannMollerRule, simplexVolume, addSimplexMonomialMoments!
 export kuhnSimplices, clippedSimplexPieces, cellMoments, fullCellMoments
-export CutCellGeometry, cutNodes, nodeSupportCells, stencilCrossings
+export CutCellGeometry, zigzagLevelSet, cutNodes, nodeSupportCells, stencilCrossings
 export sliverAggregation, applyAggregation
 export CutCellScheme, cutCellRows, cutCellSelfCheck, installRows, pinRows

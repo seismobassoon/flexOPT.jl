@@ -29,14 +29,18 @@ Void-side nodes (not on `side`) that a cut-cell row can read:
   pinned zero there.
 
 The extension follows the grid direction `o` closest to the inward normal:
-`J = I + k o` is the first node on `side`, `K = J + o`, and
-u_I = (1+k) u_J - k u_K (linear) or u_J (constant, or when K is not on
-`side`). Returns a vector of `(node, target, extension, aggregate)`.
+`J = I + k o` is the first node on `side`, and u_I is the Lagrange
+extrapolation of degree 0 (:constant), 1 (:linear, u_I = (1+k) u_J - k u_K
+with K = J + o), 2 (:quadratic) or 3 (:cubic) from J, J + o, J + 2o, ...
+(lower degree where the material side has fewer nodes). Use a degree that
+matches the scheme: linear for OPT3, cubic for OPT5. Returns a vector of `(node, target, extension, aggregate)`.
 """
 function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
                            extension::Symbol=:linear, reach::Int=1) where {N}
-    extension in (:linear, :constant) ||
-        throw(ArgumentError("extension must be :linear or :constant"))
+    degree = Dict(:constant => 0, :linear => 1, :quadratic => 2, :cubic => 3)
+    haskey(degree, extension) ||
+        throw(ArgumentError("extension must be :constant, :linear, :quadratic or :cubic"))
+    wanted = degree[extension]
     ls = geom.levelSet
     mask = sideMask(ls; side=side)
     cut = cutNodes(geom; side=side)
@@ -72,13 +76,17 @@ function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
         end
         isnothing(best) && error("node $I has no node on side $side within $(reach + 1) steps")
         J = I + bestK * best
-        weights = [(J, 1.0)]
-        if extension === :linear
-            K = J + best
-            if checkbounds(Bool, mask, K) && mask[K]
-                weights = [(J, 1.0 + bestK), (K, -Float64(bestK))]
-            end
+        # Lagrange extrapolation to s = 0 (node I) from the nodes J + m·o at s = k + m,
+        # m = 0..q, q = the wanted degree or less if the material side runs out
+        q = 0
+        while q < wanted
+            K = J + (q + 1) * best
+            (checkbounds(Bool, mask, K) && mask[K]) || break
+            q += 1
         end
+        sNodes = [Float64(bestK + m) for m in 0:q]
+        weights = [(J + m * best, prod((0.0 - sNodes[j]) / (sNodes[m+1] - sNodes[j]) for j in 1:q+1 if j != m + 1; init=1.0))
+                   for m in 0:q]
         push!(out, (node=I, target=J, extension=weights, aggregate=(I in cutSet)))
     end
     return out

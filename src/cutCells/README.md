@@ -70,6 +70,29 @@ recipe code.
 * Limits for now: weak form, one ν geometry, no hierarchical test functions,
   1-D integrand breakpoints on grid nodes (true for OPT3 volume recipes).
 
+Additions 2026-11-25:
+
+* `CutCellGeometry(ls; zigzag=true)` (`zigzagLevelSet`): the stair-step
+  surface (a cell is material iff all its corners are), through the SAME
+  operators, so cut cell and zigzag differ only by the integration domain;
+* `sliverAggregation(...; reach, extension)`: every void node within the
+  stencil half-width (`reach`: 1 for OPT3, 2 for OPT5) of a cut node is
+  extended by Lagrange extrapolation of degree 0-3 (`:constant`,
+  `:linear`, `:quadratic`, `:cubic`; linear for OPT3, cubic for OPT5);
+* volume recipes built on the CPU in Float64 (`FLEXOPT_CPU_RECIPE=1` in
+  dev/cutCells): the self-check is then at round-off (1e-15 in 2-D); the
+  August 2026 Metal (Float32) 2-D recipes agree only to ~5e-7.
+
+1-D result (`dev/cutCells/paper1D.jl`, raw traces vs exact): zigzag
+reflection late/early by exactly -2ηΔx/c and first-order convergence; cut
+cells: timing error ≤ 0.1Δx/c (OPT3) and ≤ 0.01Δx/c (OPT5), raw L2 error at
+16 points/λ ≤ 3e-2 (OPT3) and ≤ 3e-3 (OPT5), convergence order ≈ 3.6 (OPT3)
+and ≈ 3.0 (OPT5) between 16 and 32 points/λ.
+
+2-D tilted plane (OPT3, Δx = 500 m): the cut-cell surface adds nothing
+measurable on top of the grid anisotropy (rotated runs differ from θ = 0 by
+the same amount with and without the free surface).
+
 Benchmarks: `dev/cutCells/run.jl freeEnd1D` (1-D bar, free end η Δx beyond
 the last node, exact solution; self-check, waveform error, reflection timing
 vs the 2ηΔx/c of a stair step, reflected amplitude). Next: 2-D tilted plane

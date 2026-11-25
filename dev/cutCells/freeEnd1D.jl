@@ -41,7 +41,8 @@ optParameters1D = Dict{String,Any}(
     "materItpl" => (ptsSpace=1, ptsTime=1, offsetSpace=1.0, offsetTime=1, YorderBspace=-1, YorderBtime=-1),
     "recipe_backend" => backend,
 )
-recipe1D = cachedRecipe(optParameters1D, "elastic1D_OPT3")
+optParameters1D = schemeParameters(optParameters1D, CUT_SCHEME)
+recipe1D = cachedRecipe(optParameters1D, "elastic1D_$(CUT_SCHEME)")
 scheme1D = flexOPT.CutCellScheme(optParameters1D)
 @show scheme1D.maxDegree scheme1D.pointsShape
 
@@ -49,17 +50,17 @@ scheme1D = flexOPT.CutCellScheme(optParameters1D)
 resultsFE = Dict{String,Any}()
 for case in filter(c -> startswith(c, "eta"), DEV.cases)
     η = etaOfCase(case)
-    println("\n== free end between nodes, η = $η (void extension: $CUT_EXTENSION)")
+    println("\n== $(CUT_VARIANT): free end between nodes, η = $η (void extension: $CUT_EXTENSION, reach $CUT_REACH)")
     xs = 0.0 + η * FE.dx                          # free end; last solid node at x = 0
     x = collect(-(FE.sourceDistance + FE.leftMargin):FE.dx:(FE.voidNodes * FE.dx))
     nx = length(x)
     ls = flexOPT.levelSetFromFunction(r -> r[1] - xs, (x,))
-    geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme1D.maxDegree)
-    solid = flexOPT.sideMask(ls)
+    geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme1D.maxDegree, zigzag=(CUT_GEOMETRY == "zigzag"))
+    solid = flexOPT.sideMask(geom.levelSet)          # zigzag: the staircase nodes
     cut = flexOPT.cutNodes(geom)
-    aggregation = flexOPT.sliverAggregation(geom; extension=CUT_EXTENSION)
+    aggregation = flexOPT.sliverAggregation(geom; extension=CUT_EXTENSION, reach=CUT_REACH)
     extended = Set(a.node for a in aggregation)
-    farVoid = [I for I in CartesianIndices(ls.φ) if !solid[I] && !(I in cut) && !(I in extended)]
+    farVoid = [I for I in CartesianIndices(geom.levelSet.φ) if !solid[I] && !(I in cut) && !(I in extended)]
     @show length(cut) [x[I[1]] for I in cut]
     for a in aggregation
         println("  void node x = $(x[a.node[1]]): ", a.aggregate ? "merged into" : "extended from",
@@ -123,22 +124,22 @@ for case in filter(c -> startswith(c, "eta"), DEV.cases)
         w = clamp((t - times[k]) / (times[k+1] - times[k]), 0.0, 1.0)
         (1 - w) * trace[k] + w * trace[k+1]
     end
-    # amplitude convention (source normalisation): fitted once, on the direct
-    # wave at the farthest receiver, where it is well separated from the reflection
+    # source-normalisation diagnostic only (numeric/exact on the direct wave at the farthest
+    # receiver); the comparisons below use the raw traces
     farthest = argmin(receivers)
     iFar = argmin(abs.(x .- receivers[farthest]))
     tDirectFar = t0 + abs(receivers[farthest] - xsrc) / FE.c
     directWindow = findall(t -> abs(t - tDirectFar) <= 1.0 / f0, times)
     directFar = [exactDirect(receivers[farthest], t) for t in times[directWindow]]
     amplitude = sum(Float64.(history[iFar, 1, directWindow]) .* directFar) / sum(abs2, directFar)
-    @printf("  source amplitude factor (numeric / exact, direct wave): %.5f\n", amplitude)
+    @printf("  source amplitude factor (numeric / exact, direct wave; diagnostic, not applied): %.5f\n", amplitude)
 
     caseResult = Dict{String,Any}("eta" => η, "selfCheck" => selfCheck, "receivers" => receivers,
         "amplitude" => amplitude)
     traces = []
     for xr in receivers
         i = argmin(abs.(x .- xr))
-        numericTrace = Float64.(history[i, 1, :]) ./ amplitude
+        numericTrace = Float64.(history[i, 1, :])          # raw: no amplitude fit (factor printed above only as a diagnostic)
         exactTrace = [exact(xr, t) for t in times]
         relError = sqrt(sum(abs2, numericTrace .- exactTrace) / sum(abs2, exactTrace))
         # reflection: numeric minus the exact direct wave, against the exact reflected wave
@@ -160,14 +161,14 @@ for case in filter(c -> startswith(c, "eta"), DEV.cases)
     resultsFE[case] = caseResult
 
     fig = Figure(size=(1100, 260 * length(traces) + 60))
-    Label(fig[0, 1], "1-D free end at x_s = $(xs) (η = $η Δx beyond the last solid node), OPT3 cut-cell vs exact"; fontsize=14)
+    Label(fig[0, 1], "1-D free end at x_s = $(xs) (η = $η Δx beyond the last solid node), $(CUT_VARIANT) vs exact"; fontsize=14)
     for (k, tr) in enumerate(traces)
         ax = Axis(fig[k, 1]; ylabel="x = $(tr.x)", xlabel=k == length(traces) ? "time" : "")
         lines!(ax, tr.times, tr.exact; color=:black, linewidth=2, label="exact")
-        lines!(ax, tr.times, tr.numeric; color=:crimson, linestyle=:dash, label="OPT3 cut-cell")
+        lines!(ax, tr.times, tr.numeric; color=:crimson, linestyle=:dash, label="$(CUT_VARIANT)")
         k == 1 && axislegend(ax; position=:lt)
     end
-    devSave(fig, "freeEnd1D_$(case)")
+    devSave(fig, CUT_VARIANT == "OPT3" ? "freeEnd1D_$(case)" : "freeEnd1D_$(CUT_VARIANT)_$(case)")
 end
 
 println("\n== summary: reflection timing error vs stair-step (time units, Δx = c = 1)")

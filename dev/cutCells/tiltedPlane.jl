@@ -27,13 +27,14 @@ const TP = (vp=6000.0, vs=3464.0, rho=2700.0, halfWidth=60e3, voidCapCells=3, du
     lines=(deep=-10e3, shallow=-1e3), force=1.0e10, sigma=500.0, cutoff=2.0,
     outputSampling=0.10, referenceDx=500.0, pointsPerSWavelength=16, rickerSharpness=1.5,
     temporalRefinement=2)
-TILT_CODE_VERSION = "v1-2026-11-24"
+TILT_CODE_VERSION = "v1-2026-11-24"   # results unchanged by the v2 metric/control additions
 dxTilt = parse(Float64, get(ENV, "FLEXOPT_TILT_DX", "500.0"))
 fTilt = TP.rickerSharpness * TP.vs / (TP.pointsPerSWavelength * TP.referenceDx)
 delayTilt = 1.5 / fTilt
 dtTilt = 0.20 * dxTilt / (sqrt(2) * TP.vp * TP.temporalRefinement)
 rickerTilt(t) = (a = π * fTilt * (t - delayTilt); (1 - 2a^2) * exp(-a^2))
-thetaOfCase(case) = parse(Float64, replace(case, "tilt" => ""))
+thetaOfCase(case) = parse(Float64, replace(replace(case, "tilt" => ""), "full" => ""))
+referenceOf(case) = startswith(case, "full") ? "full0" : "tilt0"
 
 optParameters2D = Dict{String,Any}(
     "famousEquationType" => "2DsismoTimeIsoHeteroSingleForce",
@@ -45,7 +46,8 @@ optParameters2D = Dict{String,Any}(
     "materItpl" => (ptsSpace=1, ptsTime=1, offsetSpace=1.0, offsetTime=1, YorderBspace=-1, YorderBtime=-1),
     "recipe_backend" => backend,
 )
-recipe2D = cachedRecipe(optParameters2D, "elastic2D_OPT3")
+optParameters2D = schemeParameters(optParameters2D, CUT_SCHEME)
+recipe2D = cachedRecipe(optParameters2D, "elastic2D_$(CUT_SCHEME)")
 @time scheme2D = flexOPT.CutCellScheme(optParameters2D)
 @show scheme2D.maxDegree scheme2D.pointsShape
 
@@ -61,7 +63,7 @@ function bilinearTrace(history, x, z, field, p)
     return Float64.(values), nodes
 end
 
-function runTiltedPlane(θdeg)
+function runTiltedPlane(θdeg; freeSurface::Bool=true)
     θ = deg2rad(θdeg)
     t̂ = SVector(cos(θ), sin(θ))
     n̂ = SVector(-sin(θ), cos(θ))
@@ -69,7 +71,9 @@ function runTiltedPlane(θdeg)
     dx, dt = dxTilt, dtTilt
     sx, sz = TP.sourceFlat
     W = TP.halfWidth
-    corners = [toGrid(a, b) for a in (sx - W, sx + W), b in (sz - W, TP.voidCapCells * dx)]
+    # without a free surface (control: grid anisotropy only) the box extends 20 km above the plane
+    top = freeSurface ? TP.voidCapCells * dx : 20e3
+    corners = [toGrid(a, b) for a in (sx - W, sx + W), b in (sz - W, top)]
     lo(d) = floor(minimum(c[d] for c in corners) / dx) * dx
     hi(d) = ceil(maximum(c[d] for c in corners) / dx) * dx
     x = collect(lo(1):dx:hi(1))
@@ -77,14 +81,14 @@ function runTiltedPlane(θdeg)
     nx, nz = length(x), length(z)
     println("  grid $(nx) × $(nz), Δx = $dx m, Δt = $(round(dt; sigdigits=4)) s")
 
-    ls = flexOPT.levelSetFromFunction(r -> dot(n̂, r), (x, z))
-    geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme2D.maxDegree)
-    solid = flexOPT.sideMask(ls)
+    ls = flexOPT.levelSetFromFunction(r -> freeSurface ? dot(n̂, r) : -1.0, (x, z))
+    geom = flexOPT.CutCellGeometry(ls; maxDegree=scheme2D.maxDegree, zigzag=(CUT_GEOMETRY == "zigzag"))
+    solid = flexOPT.sideMask(geom.levelSet)          # zigzag: the staircase nodes
     cut = flexOPT.cutNodes(geom)
     cutSet = Set(cut)
-    aggregation = flexOPT.sliverAggregation(geom; extension=CUT_EXTENSION)
+    aggregation = flexOPT.sliverAggregation(geom; extension=CUT_EXTENSION, reach=CUT_REACH)
     extended = Set(a.node for a in aggregation)
-    farVoid = [I for I in CartesianIndices(ls.φ) if !solid[I] && !(I in cutSet) && !(I in extended)]
+    farVoid = [I for I in CartesianIndices(geom.levelSet.φ) if !solid[I] && !(I in cutSet) && !(I in extended)]
     nMerged = count(a -> a.aggregate, aggregation)
     println("  $(length(cut)) cut nodes ($(count(I -> solid[I], cut)) solid), $(nMerged) void nodes merged, ",
         "$(length(aggregation) - nMerged) extended, $(length(farVoid)) pinned")
@@ -111,7 +115,8 @@ function runTiltedPlane(θdeg)
     maximum(values(selfCheck)) < selfCheckTolerance(recipe2D) || error("cut-cell rows of an uncut node differ from the volume rows: $selfCheck")
     rowsTime = @elapsed rows = flexOPT.cutCellRows(scheme2D, geom, cut, models, volume)
     println("  cut-cell rows: $(round(rowsTime; digits=1)) s")
-    system = flexOPT.pinRows(flexOPT.applyAggregation(flexOPT.installRows(volume, rows), aggregation), farVoid)
+    system = freeSurface ?
+        flexOPT.pinRows(flexOPT.applyAggregation(flexOPT.installRows(volume, rows), aggregation), farVoid) : volume
 
     # source: Gaussian weights around the rotated source point, force along n̂
     specs = [(I, exp(-sum(abs2, SVector(x[I[1]], z[I[2]]) - src) / (2TP.sigma^2)))
@@ -131,7 +136,7 @@ function runTiltedPlane(θdeg)
     end
     stride = max(1, round(Int, TP.outputSampling / dt))
     marchTime = @elapsed propagation = propagateLinearSystem(system, steps, dt; sourceFull=source,
-        output_stride=stride, blowup_limit=1e8, solver_name="OPT3 cut-cell tilt $(θdeg)°", scheme=:direct)
+        output_stride=stride, blowup_limit=1e8, solver_name="$(CUT_VARIANT) tilt $(θdeg)°", scheme=:direct)
     propagation.stopped_early && error("propagation stopped early (blow-up) at θ = $θdeg°")
     println("  propagation: $(round(marchTime; digits=1)) s")
     history = propagation.history                 # (nx, nz, 2, nt)
@@ -155,25 +160,33 @@ function runTiltedPlane(θdeg)
         "nExtended" => length(aggregation) - nMerged, "rowsTime" => rowsTime, "marchTime" => marchTime)
 end
 
-tiltCases = filter(c -> startswith(c, "tilt"), DEV.cases)
-"tilt0" in tiltCases || pushfirst!(tiltCases, "tilt0")
+tiltCases = filter(c -> startswith(c, "tilt") || startswith(c, "full"), DEV.cases)
+for ref in unique(referenceOf.(tiltCases))
+    ref in tiltCases || pushfirst!(tiltCases, ref)
+end
 resultsTilt = Dict{String,Any}()
 for case in tiltCases
     θdeg = thetaOfCase(case)
-    println("\n== tilted plane, θ = $(θdeg)°")
+    freeSurface = startswith(case, "tilt")
+    println("\n== ", freeSurface ? "tilted plane" : "no free surface (control)", ", θ = $(θdeg)°")
     params = Dict{String,Any}("stage" => "tiltedPlane", "theta" => θdeg, "dx" => dxTilt,
         "halfWidth" => TP.halfWidth, "duration" => TP.duration, "extension" => String(CUT_EXTENSION),
         "codeVersion" => TILT_CODE_VERSION)
+    freeSurface || (params["freeSurface"] = false)     # key only for the control, so tilt* caches stay valid
+    CUT_SCHEME == "OPT3" || (params["scheme"] = CUT_SCHEME)
+    CUT_GEOMETRY == "cut" || (params["geometry"] = CUT_GEOMETRY)
     devRedo!("tilt", params, "dev/cutCells", "tiltedPlane")
-    resultsTilt[case] = myProduceOrLoad(cfg -> runTiltedPlane(θdeg), params, "dev/cutCells", "tiltedPlane")
+    resultsTilt[case] = myProduceOrLoad(cfg -> runTiltedPlane(θdeg; freeSurface=freeSurface), params, "dev/cutCells", "tiltedPlane")
 end
 
 # ------------------------------------------------------------- comparison
-function windowMetrics(times, a, ref, tEnd)
+# errors are normalised by the size of the WHOLE reference displacement at the receiver (both
+# components), so a component that is ~0 by symmetry (u_t above the source) does not blow up
+function windowMetrics(times, a, ref, tEnd, refNorm, refMax)
     keep = times .<= tEnd
     ta, aa, rr = times[keep], a[keep], ref[keep]
-    scale = max(maximum(abs, rr), eps())
-    relL2 = norm(aa .- rr) / max(norm(rr), eps())
+    scale = max(refMax, eps())
+    relL2 = norm(aa .- rr) / max(refNorm, eps())
     sample(v, t) = (k = clamp(searchsortedlast(ta, t), 1, length(ta) - 1);
         w = clamp((t - ta[k]) / (ta[k+1] - ta[k]), 0.0, 1.0); (1 - w) * v[k] + w * v[k+1])
     lags = -0.3:0.005:0.3
@@ -184,18 +197,22 @@ function windowMetrics(times, a, ref, tEnd)
 end
 
 reference = resultsTilt["tilt0"]
-println("\n== cut-cell surface vs the flat reference (tilt0), window ends before any artificial-edge return")
+println("\n== rotated runs vs their θ = 0 reference (tilt* vs tilt0: cut-cell surface; full* vs full0: no surface,\n   grid anisotropy only); window ends before any artificial-edge return; errors relative to |u| (both components)")
 @printf("  %-7s %-8s %-7s %-4s %-9s %-10s %-10s %-8s %-8s\n", "case", "line", "x' km", "comp", "t_end s",
     "rel. L2", "max err", "lag s", "corr")
 summaryTilt = []
 for case in tiltCases
-    case == "tilt0" && continue
+    case == referenceOf(case) && continue
     r = resultsTilt[case]
+    refRun = resultsTilt[referenceOf(case)]
     for key in sort(collect(keys(r["traces"])))
-        tr, rf = r["traces"][key], reference["traces"][key]
+        tr, rf = r["traces"][key], refRun["traces"][key]
         tEnd = min(TP.duration, tr.tReturn, rf.tReturn)
+        keepRef = refRun["times"] .<= tEnd
+        refNorm = sqrt(sum(abs2, rf.un[keepRef]) + sum(abs2, rf.ut[keepRef]))
+        refMax = max(maximum(abs, rf.un[keepRef]), maximum(abs, rf.ut[keepRef]))
         for comp in (:un, :ut)
-            m = windowMetrics(r["times"], getproperty(tr, comp), getproperty(rf, comp), tEnd)
+            m = windowMetrics(r["times"], getproperty(tr, comp), getproperty(rf, comp), tEnd, refNorm, refMax)
             @printf("  %-7s %-8s %-7.0f %-4s %-9.2f %-10.3e %-10.3e %+-8.3f %-8.4f\n", case, tr.line, tr.x_km,
                 String(comp), tEnd, m.relL2, m.maxErr, m.lag, m.corr)
             push!(summaryTilt, (case=case, theta=r["theta"], line=tr.line, x_km=tr.x_km, comp=comp, m...))
@@ -220,9 +237,16 @@ if dxTilt == 500.0 && isdir(specfemOutputTilt)
         disp[2:end] .= cumsum(((raw.values[1:end-1] .+ raw.values[2:end]) ./ 2) .* diff(raw.time))
         specfemTraces[ir] = (time=Float64.(raw.time), values=disp)
         mine = (time=reference["times"], values=reference["traces"]["deep_$(ir)"].un)
-        m = specfemBenchmark.waveform_metrics(specfemTraces[ir], mine; samples=1001)
-        @printf("  x' = %4.0f km   correlation %.4f   relative error (after amplitude fit) %.3e   amplitude %.4f\n",
-            TP.receiversX[ir] / 1e3, m.correlation, m.relative_error, m.optimal_amplitude)
+        # raw comparison: no normalisation, no amplitude fit
+        sp = specfemTraces[ir]
+        keep = sp.time .<= TP.duration
+        mineAt = [begin k = clamp(searchsortedlast(mine.time, t), 1, length(mine.time) - 1)
+            w = (t - mine.time[k]) / (mine.time[k+1] - mine.time[k]); (1 - w) * mine.values[k] + w * mine.values[k+1] end
+            for t in sp.time[keep]]
+        @printf("  x' = %4.0f km   raw rel. L2 %.3f   raw max error / max|SPECFEM| %.3f   peak ratio %.4f\n",
+            TP.receiversX[ir] / 1e3, norm(mineAt .- sp.values[keep]) / norm(sp.values[keep]),
+            maximum(abs, mineAt .- sp.values[keep]) / maximum(abs, sp.values[keep]),
+            maximum(abs, mineAt) / maximum(abs, sp.values[keep]))
     end
 end
 
@@ -230,7 +254,7 @@ end
 colorsTilt = Dict("tilt10" => :dodgerblue, "tilt20" => :darkorange, "tilt30" => :crimson, "tilt45" => :purple)
 for line in ("deep", "shallow")
     fig = Figure(size=(1500, 230 * length(TP.receiversX) + 80))
-    Label(fig[0, 1:2], "Tilted free surface (OPT3 cut-cell), $(line) receivers ($(round(Int, -TP.lines[Symbol(line)] / 1e3)) km below the surface): " *
+    Label(fig[0, 1:2], "Tilted free surface ($(CUT_VARIANT)), $(line) receivers ($(round(Int, -TP.lines[Symbol(line)] / 1e3)) km below the surface): " *
         "rotated components vs θ = 0 (black)"; fontsize=14)
     for (ir, xp) in enumerate(TP.receiversX), (ic, comp) in enumerate((:un, :ut))
         key = "$(line)_$(ir)"
@@ -238,7 +262,7 @@ for line in ("deep", "shallow")
             xlabel=ir == length(TP.receiversX) ? "time (s)" : "")
         lines!(ax, reference["times"], getproperty(reference["traces"][key], comp); color=:black, linewidth=2.5, label="θ = 0°")
         for case in tiltCases
-            case == "tilt0" && continue
+            (case == "tilt0" || !startswith(case, "tilt")) && continue
             r = resultsTilt[case]
             lines!(ax, r["times"], getproperty(r["traces"][key], comp); color=get(colorsTilt, case, :gray),
                 linestyle=:dash, label="θ = $(round(Int, r["theta"]))°")
@@ -247,6 +271,6 @@ for line in ("deep", "shallow")
         end
         ir == 1 && ic == 1 && axislegend(ax; position=:lt)
     end
-    devSave(fig, "tilted_plane_$(line)")
+    devSave(fig, CUT_VARIANT == "OPT3" ? "tilted_plane_$(line)" : "tilted_plane_$(CUT_VARIANT)_$(line)")
 end
 println("\n(dotted lines: end of the comparison window, first return from an artificial grid edge)")
