@@ -96,7 +96,7 @@ julia --project=. dev/moonRSGT/synth.jl --models=all --requests=req.csv --out=sy
 Python (students; numpy + h5py; calls synth.jl, wrapped in `srun` outside a Slurm job):
 
 ```python
-import sys; sys.path.append("/gpfs/users/nobuaki/github/flexOPT.jl/dev/moonRSGT/python")
+import sys; sys.path.append("/gpfs/users/nobuaki/github/flexOPT.jl/educationPurposePythonScripts/RSGTreader")
 from moon_rsgt import moon_synthetics
 t, data, models = moon_synthetics("all", stla=-3.0, stlo=-23.4, evla=20.0, evlo=15.0, evdp=900.0,
                                   mrr=1e15, mtt=-5e14, mpp=-5e14, mrt=0, mrp=0, mtp=0)
@@ -144,3 +144,10 @@ moment tensor in this code's order (Mrr, Mrθ, Mrφ, Mθθ, Mθφ, Mφφ).
 * `lib/moonSynthetics.jl` loader, sources, spectra, time series (student side)
 * `lib/moonChecks.jl` validation against source-side synthetics
 * `slurm/build_catalogue.sbatch` array job
+
+## Python (students)
+
+Python readers live in `educationPurposePythonScripts/RSGTreader/`:
+`moon_rsgt_py.py` (pure numpy + h5py, reads the HDF5 export of `export_h5.jl`, velocity by default; see
+`README_students.md` there), `moon_rsgt.py` (thin wrapper calling `synth.jl`, needs Julia), and
+`check_python_vs_julia.py` (compares the two).

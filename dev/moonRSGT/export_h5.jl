@@ -13,7 +13,7 @@
 #   pairs_disp_src,   pairs_disp_comp     int (5)    force component s and displacement component c (r,θ,φ)
 #   omega (nω) rad/s, omega_i, tlen (s), r_km (nr, increasing), layer (nr), theta_deg (nθ)
 #   R_km, max_depth_km, model_id, format = "moonRSGT-h5 v1"
-# Units: strain per unit force (code units, see python/moon_rsgt_py.py), displacement in km.
+# Units: strain per unit force (code units, see educationPurposePythonScripts/RSGTreader/moon_rsgt_py.py), displacement in km.
 
 using JLD2, Printf
 include(joinpath(@__DIR__, "lib", "moonSynthetics.jl"))     # moonModelIds, loadMoonRSGT

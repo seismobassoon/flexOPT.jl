@@ -3,7 +3,7 @@
 Thin wrapper around dev/moonRSGT/synth.jl (Julia does the work; Python only
 writes the requests and reads the result).  Needs numpy and h5py.
 
-    import sys; sys.path.append("/gpfs/users/nobuaki/github/flexOPT.jl/dev/moonRSGT/python")
+    import sys; sys.path.append("/gpfs/users/nobuaki/github/flexOPT.jl/educationPurposePythonScripts/RSGTreader")
     from moon_rsgt import moon_synthetics
 
     t, data, models = moon_synthetics(

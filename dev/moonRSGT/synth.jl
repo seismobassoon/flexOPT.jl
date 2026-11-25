@@ -1,5 +1,5 @@
 # dev/moonRSGT/synth.jl -- command-line synthetics from the Moon RSGT catalogue
-# (used by python/moon_rsgt.py; also handy on its own).  Run it on a compute
+# (used by educationPurposePythonScripts/RSGTreader/moon_rsgt.py; also handy on its own).  Run it on a compute
 # node (srun / sbatch / Jupyterhub), never on stella*.
 #
 # One synthetic:
