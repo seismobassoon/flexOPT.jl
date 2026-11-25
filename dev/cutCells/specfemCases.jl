@@ -12,6 +12,7 @@
 # src/specfemBenchmark.jl):
 #   julia --project=. dev/cutCells/specfemCases.jl                 # tilt0 tilt10 tilt20 tilt30 hill
 #   julia --project=. dev/cutCells/specfemCases.jl tilt20 hill
+#   FLEXOPT_SPECFEM_ELEMENT=1000 julia --project=. dev/cutCells/specfemCases.jl tilt20 hill   # refined check
 #   FLEXOPT_REDO_SPECFEM=1 julia --project=. dev/cutCells/specfemCases.jl ...
 # Cases live in data/specfem2d_benchmarks/cutcells_<case>_dx500m; traces are collected
 # in dev/cutCells/outputs/references/specfem_<case>.jld2.
@@ -26,8 +27,12 @@ include(joinpath(@__DIR__, "geometryCases.jl"))
 using .specfemBenchmark, JLD2, Printf
 
 const SPECFEM_DX = 500.0
-const SPECFEM_ELEMENT = 4SPECFEM_DX          # 2 km spectral elements (5 GLL points), as the flat benchmark
-specfemDt() = 0.20 * SPECFEM_DX / (sqrt(2) * GC.vp * 2)   # = flexOPT Δt (0.00589 s), as the flat benchmark
+# element size: 2 km (5 GLL points), as the flat benchmark; ENV FLEXOPT_SPECFEM_ELEMENT=1000 gives a
+# refined run (own directory and trace file, suffix _el1000m) to check that SPECFEM2D itself has converged
+const SPECFEM_ELEMENT = parse(Float64, get(ENV, "FLEXOPT_SPECFEM_ELEMENT", "2000"))
+const SPECFEM_SUFFIX = SPECFEM_ELEMENT == 2000 ? "" : "_el$(round(Int, SPECFEM_ELEMENT))m"
+# = flexOPT Δt (0.00589 s) for 2 km elements, as the flat benchmark; scaled with the element size (CFL)
+specfemDt() = 0.20 * SPECFEM_DX / (sqrt(2) * GC.vp * 2) * min(1.0, SPECFEM_ELEMENT / 2000)
 
 function writeParallelInterfaces(path, x, surface, depth, nzElements)
     open(path, "w") do io
@@ -45,6 +50,17 @@ function writeParallelInterfaces(path, x, surface, depth, nzElements)
     path
 end
 
+# SPECFEM2D force direction: anglesource = a gives (sin a, cos a) in (x, z) -- measured on the first
+# runs (2026-11-25: with a = +θ the field above the source had u_t/u_n = 0.8/1.7/3.6 at 10/20/30°
+# and u_n ∝ cos 2θ, i.e. the force was 2θ off n̂). n̂ = (-sin θ, cos θ) therefore needs a = -θ.
+specfemAngle(case) = -caseTheta(case)
+function storedAngle(caseDir)
+    file = joinpath(caseDir, "DATA", "SOURCE")
+    isfile(file) || return NaN
+    m = match(r"anglesource\s*=\s*([-+0-9.eEdD]+)", read(file, String))
+    isnothing(m) ? NaN : parse(Float64, replace(m.captures[1], r"[dD]" => "e"))
+end
+
 function runSpecfemCase(case; redo=get(ENV, "FLEXOPT_REDO_SPECFEM", "0") == "1")
     hasFreeSurface(case) || error("SPECFEM2D reference only for cases with a free surface")
     dx = SPECFEM_DX
@@ -60,19 +76,20 @@ function runSpecfemCase(case; redo=get(ENV, "FLEXOPT_REDO_SPECFEM", "0") == "1")
     vp = fill(GC.vp, length(x), length(z))
     vs = fill(GC.vs, length(x), length(z))
     rho = fill(GC.rho, length(x), length(z))
-    nxElements = cld(length(x) - 1, 4)
+    nxElements = ceil(Int, (last(x) - first(x)) / SPECFEM_ELEMENT - 1e-9)   # = cld(nx - 1, 4) for 2 km
     nzElements = round(Int, depth / SPECFEM_ELEMENT)
     weights = caseSourceWeights(case, xGrid, zGrid)
     sources = [(x=xGrid[i], z=zGrid[k], weight=w) for (i, k, w) in weights]
     receivers = caseReceivers(case)
     points = vcat([(x=p[1], z=p[2]) for p in receivers[:deep]], [(x=p[1], z=p[2]) for p in receivers[:shallow]])
-    caseDir = joinpath(flexopt_root, "data", "specfem2d_benchmarks", "cutcells_$(case)_dx$(round(Int, dx))m")
+    caseDir = joinpath(flexopt_root, "data", "specfem2d_benchmarks", "cutcells_$(case)_dx$(round(Int, dx))m$(SPECFEM_SUFFIX)")
     dt = specfemDt()
-    if redo || !isfile(joinpath(caseDir, "solver.log"))
+    redo = redo || !isfile(joinpath(caseDir, "solver.log")) || storedAngle(caseDir) != specfemAngle(case)
+    if redo
         prepared = prepare_specfem2d_case(caseDir, x, z, vp, vs, rho, surface;
             sources=sources, receiver_points=points, record_at_surface_same_vertical=false,
             duration=GC.duration, dt=dt, f0=gcFrequency(), source_factor=GC.force,
-            source_angle=caseTheta(case),       # SPECFEM force: (-sin a, cos a) = n̂ for a = θ
+            source_angle=specfemAngle(case),
             source_type=1, seismotype=1, source_time_function=gcRicker,
             nx_elements=nxElements, nz_elements=nzElements, free_surface=true)
         writeParallelInterfaces(prepared.interfaces, x, surface, depth, nzElements)
@@ -100,14 +117,14 @@ function runSpecfemCase(case; redo=get(ENV, "FLEXOPT_REDO_SPECFEM", "0") == "1")
     times = Float64.(tz[1].time)
     outDir = joinpath(@__DIR__, "outputs", "references")
     mkpath(outDir)
-    jldsave(joinpath(outDir, "specfem_$(case).jld2"); case, times, traces)
+    jldsave(joinpath(outDir, "specfem_$(case)$(SPECFEM_SUFFIX).jld2"); case, times, traces, element=SPECFEM_ELEMENT)
     # sanity check of the force direction: above the source u_t vanishes by symmetry (tilted plane)
     if caseKind(case) == :tilt
         tr = traces["deep_3"]
         @printf("  check: max|u_t| / max|u_n| above the source = %.3f (≈ 0 if the force angle convention is right)\n",
             maximum(abs, tr.ut) / maximum(abs, tr.un))
     end
-    println("  traces -> ", joinpath(outDir, "specfem_$(case).jld2"))
+    println("  traces -> ", joinpath(outDir, "specfem_$(case)$(SPECFEM_SUFFIX).jld2"))
 end
 
 specfemCaseList = isempty(ARGS) ? ["tilt0", "tilt10", "tilt20", "tilt30", "hill"] : ARGS
