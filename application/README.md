@@ -73,6 +73,7 @@ benchmarked in `dev/` (it works, but its options and outputs may change);
 | [`RayTheory/`](RayTheory/) | rays (Hamiltonian), 1-D spherical and 2-D/3-D Cartesian, isotropic and anisotropic, TauP-like phase names | `check`, `s1`, `s2`, `s3` | via `dev/raytheory` |
 | [`Neutrino_Earth/`](Neutrino_Earth/) | 3-flavour neutrino oscillations through a planet (flux, cross sections, detector) | — | notebook (see its README) |
 | [`Sonification/`](Sonification/) | turns any trace into a WAV file (an *output*, not an equation) | default demo, or your own trace | **ready** |
+| [`Outputs_1D/`](Outputs_1D/) | derived quantities (q = a ∂x u) declared like famous equations and cooked with OPT recipes, vs Fornberg FD | `compare`, `convergence` | **new** (step 1 of the output recipes) |
 | [`forBoris/`](forBoris/) | 2-D elastic point force AND normal-incidence plane wave, flat free surface, homogeneous half-space (OPT3/OPT5 only, no SPECFEM2D/FD3) | `run`, `runPlaneWave` | via `dev/freeSurfacePointSource`, `dev/freeSurfacePlaneWave` |
 
 Not yet wrapped here (open the notebook directly):
