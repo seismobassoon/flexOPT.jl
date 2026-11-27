@@ -17,7 +17,7 @@
 # `applyAggregation(...; aggregate_test=false)`.
 
 """
-    sliverAggregation(geom; side=:minus, extension=:linear, reach=1)
+    sliverAggregation(geom; side=:minus, extension=:linear, reach=1, maxSteps=reach + 1)
 
 Void-side nodes (not on `side`) that a cut-cell row can read:
 
@@ -29,14 +29,15 @@ Void-side nodes (not on `side`) that a cut-cell row can read:
   pinned zero there.
 
 The extension follows the grid direction `o` closest to the inward normal:
-`J = I + k o` is the first node on `side`, and u_I is the Lagrange
+`J = I + k o` (k ≤ `maxSteps`, default `reach + 1`; 3-D needs more, since a
+diagonal neighbour of a cut node can sit ~2.8 cells from the material) is the first node on `side`, and u_I is the Lagrange
 extrapolation of degree 0 (:constant), 1 (:linear, u_I = (1+k) u_J - k u_K
 with K = J + o), 2 (:quadratic) or 3 (:cubic) from J, J + o, J + 2o, ...
 (lower degree where the material side has fewer nodes). Use a degree that
 matches the scheme: linear for OPT3, cubic for OPT5. Returns a vector of `(node, target, extension, aggregate)`.
 """
 function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
-                           extension::Symbol=:linear, reach::Int=1) where {N}
+                           extension::Symbol=:linear, reach::Int=1, maxSteps::Int=reach + 1) where {N}
     degree = Dict(:constant => 0, :linear => 1, :quadratic => 2, :cubic => 3)
     haskey(degree, extension) ||
         throw(ArgumentError("extension must be :constant, :linear, :quadratic or :cubic"))
@@ -60,7 +61,7 @@ function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
         for o in CartesianIndices(ntuple(_ -> -1:1, N))
             all(iszero, Tuple(o)) && continue
             k = 0
-            for s in 1:reach+1
+            for s in 1:maxSteps
                 J = I + s * o
                 checkbounds(Bool, mask, J) || break
                 if mask[J]
@@ -74,7 +75,7 @@ function sliverAggregation(geom::CutCellGeometry{N}; side::Symbol=:minus,
                 best, bestK, bestScore = o, k, score
             end
         end
-        isnothing(best) && error("node $I has no node on side $side within $(reach + 1) steps")
+        isnothing(best) && error("node $I has no node on side $side within $maxSteps steps (raise maxSteps)")
         J = I + bestK * best
         # Lagrange extrapolation to s = 0 (node I) from the nodes J + m·o at s = k + m,
         # m = 0..q, q = the wanted degree or less if the material side runs out

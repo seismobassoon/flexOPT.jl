@@ -261,3 +261,62 @@ Raw relative L2 (mean over a line) against SPECFEM2D:
   and stops if it is not small. With the fix, OPT5 cut-cell runs at tilt20, tilt30 and the
   hill. **Results computed before this fix (including OPT5 tilt0) must be recomputed**
   (`--redo=tilt`), since a bad factorization can pollute a run without blowing it up.
+
+---------------------------------------------------------------------------------------
+
+## 9. 3-D cases (26 Nov 2026): oblique planes, then Gaussian hill, then Kirishima
+
+Order agreed: linear slope (oblique planes) → 3-D Gaussian hill → Kirishima.
+Definitions in `geometryCases3D.jl` (plain Julia). Same medium, Ricker (f₀ = 0.6495 Hz,
+t₀ = 1.5/f₀) and 500 m grid as in 2-D; smaller box for memory.
+
+| quantity | value |
+|---|---|
+| coordinates | (x, y, z), z up |
+| source | flat frame (0, 0, −6 km); Gaussian on the 500 m nodes, σ = 500 m, cutoff 2σ, Σw = 1; point force F = 10¹⁰ **N** (3-D), along **n** |
+| receivers (9 per line) | x′ = −5, −2.5, 0, 2.5, 5 km at y′ = 0, then y′ = −5, −2.5, 2.5, 5 km at x′ = 0 |
+| lines | deep z′ = −3 km, shallow z′ = −1 km |
+| components | (u₁, u₂, u_n) = Rᵀu (flat-frame components) |
+| duration | 6 s |
+| flexOPT box | ±8 km around the source, 8 km below it, + 10 Cerjan cells (sides, bottom), 3 void cells on top: 53 × 53 × 42–56 nodes |
+
+Cases: `flat3D` (z = 0), `oblique10`, `oblique20`: normal **n** = (−sinθ cosφ, −sinθ sinφ, cosθ),
+φ = 30°, so the plane cuts the grid along all three axes. R is the rotation about **e_z** × **n** by θ;
+an oblique case is the flat one rotated by R, so the **exact reference is the flat solution**
+at the same receiver (as for the 2-D tilts).
+
+**SPECFEM3D_Cartesian** (`specfem3DCases.jl`): internal mesher, one layer between a flat bottom
+and the free surface given as the top interface (2 km grid, bilinear: exact for a plane), 2 km
+elements, NGLL = 5, Stacey on 5 sides, ±25 km laterally, 25 km below the source,
+DT = 2.5 ms; one FORCESOLUTION entry per source node (factor F·w), external STF (SPECFEM3D's
+time origin is then 0), stations and sources at their z (`USE_SOURCES_RECEIVERS_Z`).
+Check on the old 10-km-offset geometry: the oblique meshes reproduce the flat run rotated to
+1–2 % (rel. L2), and u₁, u₂ above the source are < 0.5 % of u_n.
+Built serially: `./configure FC=gfortran CC=gcc --without-mpi && make xmeshfem3D
+xgenerate_databases xspecfem3D`; `SPECFEM3D_ROOT` (default `../othersPackages/specfem3d`).
+
+**flexOPT 3-D** (`run3D.jl`): OPT3 recipe of `3DsismoTimeIsoHeteroForce` (weak form),
+operators with Cerjan padding as `dev/greenland_nov2026`; level set, cut cells and cut rows
+on the whole padded grid; the Cerjan weight of past-time columns of padding points is
+re-applied to the installed cut rows. Void treatment as in 2-D, with the extension search
+allowed up to `reach + 3` steps (`sliverAggregation(...; maxSteps)`): in 3-D a diagonal
+neighbour of a cut node can sit ~2.8 cells from the material. Time marching: the
+predictor–corrector with lumped-future blocks, except at constraint points (extended and
+pinned void nodes), where the block is the node's own coefficients (the lumped block of an
+extrapolation row is 1 − Σw = 0). Only the receiver nodes are kept.
+Self-check (cut rows of an uncut node vs the volume rows): 1e-14 in 3-D.
+
+Cost (OPT3): volume operator ~7 min for 44 k nodes on 2 cloud cores; cut rows 0.2 s per
+cut node after the 26 Nov speed-up of `_cutCellBlockCoefficients` (a function barrier
+around the loop that fills S: it was 2 s per node, same arithmetic); about 15 kB per node
+for A, L and R, plus copies while rows are installed.
+
+Commands (flexOPT root):
+
+```bash
+julia --project=. dev/cutCells/specfem3DCases.jl                       # flat3D oblique10 oblique20
+FLEXOPT_CPU_RECIPE=1 julia --project=. -t auto dev/cutCells/run3D.jl   # OPT3 cut-cell, three cases
+FLEXOPT_CPU_RECIPE=1 FLEXOPT_CUT_GEOMETRY=zigzag julia --project=. -t auto dev/cutCells/run3D.jl
+julia --project=. dev/cutCells/compare3D.jl                            # errors.csv + wiggles3D_<case>.png
+```
+`run3D.jl --small` runs a 5 km box for 2 s (pipeline test); `--redo` recomputes.

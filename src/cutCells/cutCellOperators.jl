@@ -504,9 +504,7 @@ function _cutCellBlockCoefficients(block::CutCellBlock, scheme, lookup, G, model
         e = entries[iα]
         isempty(e.rows) && continue
         fill!(S, 0.0)
-        for k in eachindex(e.rows)
-            S[e.rows[k], e.cols[k]] += e.factors[k] * spatialTable[e.spatial[k]]
-        end
+        _accumulateS!(S, e.rows, e.cols, e.factors, e.spatial, spatialTable)
         out = Ccmat * S * transpose(Cmat)            # (material point, field point)
         node = block.alphaNodes[iα]
         iField, iExpr = block.alphaField[iα], block.alphaExpr[iα]
@@ -519,6 +517,17 @@ function _cutCellBlockCoefficients(block::CutCellBlock, scheme, lookup, G, model
         end
     end
     return coefficients
+end
+
+# Function barrier: `spatialTable` is an N-dimensional array whose N is only known at run
+# time; looping over it inside `_cutCellBlockCoefficients` dispatched dynamically on every
+# entry (~9 M per node in 3-D, 2 s per node). Same arithmetic, same order.
+function _accumulateS!(S::Matrix{Float64}, rows::Vector{Int}, cols::Vector{Int},
+                       factors::Vector{Float64}, spatial::Vector{Int}, table::Array{Float64})
+    @inbounds for k in eachindex(rows)
+        S[rows[k], cols[k]] += factors[k] * table[spatial[k]]
+    end
+    return S
 end
 
 function _nodeValue(node, vars, models, point, nVars, cache, iα, block)
