@@ -21,7 +21,9 @@ const MOON_H5_DIR = Ref(get(ENV, "MOON_RSGT_H5_DIR", expanduser("~/Dropbox/stage
 moonH5Ids(dir=MOON_H5_DIR[]) = sort([f[6:end-3] for f in readdir(dir) if startswith(f, "rsgt_") && endswith(f, ".h5")])
 
 moonH5File(id; dir=MOON_H5_DIR[]) =
-    (id isa AbstractString && isfile(id)) ? String(id) : joinpath(dir, "rsgt_" * lpad(string(idconst _MOON_H5_LAST = Ref{Any}(nothing)
+    (id isa AbstractString && isfile(id)) ? String(id) : joinpath(dir, "rsgt_" * lpad(string(id), 5, '0') * ".h5")
+
+const _MOON_H5_LAST = Ref{Any}(nothing)
 
 """
 Open one model: metadata only (v2: the compressed θ blocks are read on demand, a few MB per
@@ -69,10 +71,6 @@ function _h5samples(c, tidx::UnitRange{Int})
     end
     S = Base.cat(pS...; dims=1); D = Base.cat(pD...; dims=1)
     return S, D
-end
-
- c
-    return c
 end
 
 # ---------------------------------------------------------------- geometry (as sgtGeometry1D.jl)

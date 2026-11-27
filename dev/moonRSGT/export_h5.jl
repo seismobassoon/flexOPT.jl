@@ -40,8 +40,8 @@ ids = moonModelIds(; dir=inDir)
 if haskey(o, "test")
     # ------------------------------------------------------------------ size vs error
     include(joinpath(@__DIR__, "..", "..", "educationPurposePythonScripts", "RSGTreader", "moon_rsgt_h5.jl"))
-    id = o["test"]
-    catl = loadMoonRSGT(id; dir=inDir)
+    tid = o["test"]
+    catl = loadMoonRSGT(tid; dir=inDir)
     raw = 8 * (length(catl.disk.strain) + length(catl.disk.disp))          # plain Float32 re + im
     tdir = mktempdir(get(ENV, "TMPDIR", tempdir()))
     cases = [(stla=-3.0, stlo=-23.4, evla=20.0, evlo=15.0, evdp=300.0),
@@ -52,10 +52,10 @@ if haskey(o, "test")
     ref = [moonSynthetics(catl; station=(c.stla, c.stlo), source=(c.evla, c.evlo, c.evdp),
                           M=fromGCMT(M.Mrr, M.Mtt, M.Mpp, M.Mrt, M.Mrp, M.Mtp), comps=(:Z, :R, :T),
                           quantity=:velocity).data for c in cases]
-    @printf("model %s: plain Float32 = %.0f MB\n", id, raw / 1e6)
+    @printf("model %s: plain Float32 = %.0f MB\n", tid, raw / 1e6)
     @printf("%-10s %-9s %10s %8s %14s %14s\n", "keepbits", "compr.", "size (MB)", "ratio", "max trace err", "write (s)")
     for kb in (23, 16, 12, 10, 8), comp in (compressor,)
-        f = joinpath(tdir, "rsgt_$(id).h5")
+        f = joinpath(tdir, "rsgt_$(tid).h5")
         t0 = time()
         sz = exportMoonH5(catl, f; keepbits=kb, compressor=comp, θblock=θblock)
         tw = time() - t0
@@ -78,20 +78,20 @@ else
         k = parse(Int, o["task"]); n = parse(Int, get(o, "per-task", "10"))
         ((k-1)*n+1):min(k * n, length(ids))
     elseif haskey(o, "models")
-        a, b = parse.(Int, split(o["models"], ':')); a:min(b, length(ids))
+        m1, m2 = parse.(Int, split(o["models"], ':')); m1:min(m2, length(ids))
     else
         1:length(ids)
     end
     mkpath(outDir)
     for k in sel
-        id = ids[k]
-        out = joinpath(outDir, "rsgt_$(id).h5")
+        mid = ids[k]
+        out = joinpath(outDir, "rsgt_$(mid).h5")
         if isfile(out) && !haskey(o, "force")
             println("skip (exists): ", out); continue
         end
         t0 = time()
-        sz = exportMoonH5(loadMoonRSGT(id; dir=inDir), out; keepbits=keepbits, compressor=compressor,
+        sz = exportMoonH5(loadMoonRSGT(mid; dir=inDir), out; keepbits=keepbits, compressor=compressor,
                           θblock=θblock, withModel=withModel)
-        @printf("%s -> %s  %.0f MB (keepbits %d, %s)  %.0f s\n", id, out, sz / 1e6, keepbits, compressor, time() - t0)
+        @printf("%s -> %s  %.0f MB (keepbits %d, %s)  %.0f s\n", mid, out, sz / 1e6, keepbits, compressor, time() - t0)
     end
 end
