@@ -34,5 +34,6 @@ include(joinpath(MOON_LIB, "moonModel.jl"))
 include(joinpath(MOON_LIB, "moonCatalogue.jl"))
 include(joinpath(MOON_LIB, "moonSynthetics.jl"))
 include(joinpath(MOON_LIB, "moonChecks.jl"))
+include(joinpath(MOON_LIB, "moonExportH5.jl"))
 moonRecipes = @isdefined(moonRecipes) ? moonRecipes : Dict{Any,Any}()
 MOON_ENV = true

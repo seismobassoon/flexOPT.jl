@@ -1,7 +1,7 @@
 #!/bin/bash
 # dev/moonRSGT/slurm/export_h5.sbatch -- JLD2 catalogue -> plain HDF5 (for Python / the students' hard disk)
 #   cd /gpfs/users/nobuaki/github/flexOPT.jl && sbatch dev/moonRSGT/slurm/export_h5.sbatch
-# Needs ≈ 0.6 TB more on scratch (the JLD2 catalogue can be deleted afterwards if only Python is used).
+#   KEEPBITS=10 EXPORT_FORCE=1 sbatch --export=ALL dev/moonRSGT/slurm/export_h5.sbatch   # other keepbits, overwrite existing files
 #SBATCH --job-name=moonRSGT-h5
 #SBATCH --partition=ncpushort
 #SBATCH --array=1-100%20
@@ -15,4 +15,4 @@ export MOON_RSGT_DIR=/gpfs/scratch/nobuaki/moonRSGT/catalogue
 export MOON_RSGT_H5_DIR=/gpfs/scratch/nobuaki/moonRSGT/catalogue_h5
 conda deactivate 2>/dev/null || true
 cd /gpfs/users/nobuaki/github/flexOPT.jl
-julia --project=. dev/moonRSGT/export_h5.jl --task=${SLURM_ARRAY_TASK_ID} --per-task=10
+julia --project=. dev/moonRSGT/export_h5.jl --task=${SLURM_ARRAY_TASK_ID} --per-task=10 --keepbits=${KEEPBITS:-12} ${EXPORT_FORCE:+--force}

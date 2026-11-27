@@ -15,6 +15,7 @@
 #   julia --project=. dev/moonRSGT/run.jl build --task=7 --per-task=10   # Slurm array task 7 → models 61:70
 #   julia --project=. dev/moonRSGT/run.jl info                 # which catalogue files exist
 # Options: --nd-dir=DIR --out-dir=DIR --force (recompute existing files)
+#   --h5 [--h5-dir=DIR --keepbits=12]: also write the compact HDF5 file (lib/moonExportH5.jl) after each model
 #   parameter overrides (defaults in lib/moonCatalogue.jl, moonDefaultParams):
 #   --scheme=OPT3|DSMconv --h=5 --dz=20 --dzShallow=5 --zShallow=60 --dtheta=0.5 --fmax=0.05 --tlen=3276.8 --fitTol=0.005
 
@@ -31,7 +32,8 @@ function parseMoonArgs(args)
         opt[kv[1]] = length(kv) == 2 ? kv[2] : "true"
     end
     known = ("nd-dir", "out-dir", "models", "task", "per-task", "model", "force",
-             "scheme", "h", "dz", "dzShallow", "zShallow", "dtheta", "fmax", "tlen", "fitTol")
+             "scheme", "h", "dz", "dzShallow", "zShallow", "dtheta", "fmax", "tlen", "fitTol",
+             "h5", "h5-dir", "keepbits")
     for k in keys(opt)
         k in known || error("unknown option --$k")
     end
@@ -110,6 +112,13 @@ elseif MOON_STEP == "build"
         try
             @time buildMoonRSGT(joinpath(ndDir, nd), catFileOf(nd); params=params, recipes=moonRecipes,
                                 configs=shConfigs, force=haskey(MOON_OPT, "force"))
+            if haskey(MOON_OPT, "h5")          # compact HDF5 for the students, right after the JLD2 file
+                h5dir = get(MOON_OPT, "h5-dir", get(ENV, "MOON_RSGT_H5_DIR", "/gpfs/scratch/nobuaki/moonRSGT/catalogue_h5"))
+                mkpath(h5dir)
+                h5 = joinpath(h5dir, "rsgt_" * replace(nd, ".nd" => "") * ".h5")
+                sz = exportMoonH5(loadMoonRSGT(catFileOf(nd)), h5; keepbits=parse(Int, get(MOON_OPT, "keepbits", "12")))
+                @printf("   -> %s (%.0f MB)\n", h5, sz / 1e6)
+            end
         catch err
             @error "model $nd failed" exception = (err, catch_backtrace())
         end

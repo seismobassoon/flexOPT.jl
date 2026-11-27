@@ -1,6 +1,6 @@
 """moon_rsgt_py.py -- Moon synthetics from the RSGT catalogue, pure Python (numpy + h5py).
 
-No Julia needed: reads the HDF5 export (rsgt_<id>.h5, made by dev/moonRSGT/export_h5.jl)
+No Julia needed: reads the HDF5 export (rsgt_<id>.h5, v1 or compressed v2, made by dev/moonRSGT/export_h5.jl)
 and does the same reconstruction as dev/moonRSGT/lib/moonSynthetics.jl (Julia):
 reciprocity, explicit 3x3 rotations, Lagrange interpolation (order 3 in depth inside a
 layer, order 5 in distance), one-sided inverse Fourier transform.  Only the few
@@ -32,7 +32,7 @@ import h5py
 import numpy as np
 
 CATALOGUE = os.environ.get("MOON_RSGT_H5_DIR", "/gpfs/scratch/nobuaki/moonRSGT/catalogue_h5")
-FORMAT = "moonRSGT-h5 v1"
+FORMATS = ("moonRSGT-h5 v1", "moonRSGT-h5 v2")
 
 
 # ---------------------------------------------------------------------------- files
@@ -128,6 +128,23 @@ def epicentral_distance(lat1, lon1, lat2, lon2):
     return float(np.degrees(np.arccos(np.clip(a @ b, -1.0, 1.0))))
 
 
+def _samples(f, fmt, kind, r0, r1, t0, t1):
+    """Complex samples [:, :, r0:r1, t0:t1]; v2 files store compressed θ blocks (only those needed are read)."""
+    if fmt == "moonRSGT-h5 v1":
+        return f[kind + "_re"][:, :, r0:r1, t0:t1] + 1j * f[kind + "_im"][:, :, r0:r1, t0:t1]
+    starts = f["theta_block_start"][()] - 1                      # 0-based first θ index of each block
+    parts = []
+    t = t0
+    while t < t1:
+        k = int(np.searchsorted(starts, t, side="right")) - 1
+        end = min(t1, starts[k + 1] if k + 1 < len(starts) else t1)
+        j0, j1 = t - starts[k], end - starts[k]
+        tag = f"{k + 1:03d}"
+        parts.append(f[f"{kind}_re_{tag}"][:, :, r0:r1, j0:j1] + 1j * f[f"{kind}_im_{tag}"][:, :, r0:r1, j0:j1])
+        t = end
+    return np.concatenate(parts, axis=3)
+
+
 # ---------------------------------------------------------------------------- spectra
 
 def spectra(mid, stla, stlo, evla, evlo, evdp, mrr=0.0, mtt=0.0, mpp=0.0, mrt=0.0, mrp=0.0, mtp=0.0,
@@ -137,8 +154,9 @@ def spectra(mid, stla, stlo, evla, evlo, evdp, mrr=0.0, mtt=0.0, mpp=0.0, mrt=0.
     Returns (omega, omega_i, tlen, {comp: spectrum}, delta_deg).
     """
     with h5py.File(model_file(mid, catalogue), "r") as f:
-        if _str(f["format"]) != FORMAT:
-            raise ValueError(f"unexpected file format {_str(f['format'])}")
+        fmt = _str(f["format"])
+        if fmt not in FORMATS:
+            raise ValueError(f"unexpected file format {fmt}")
         R = float(f["R_km"][()])
         dmax = float(f["max_depth_km"][()])
         if not (0.0 <= evdp <= dmax + 1e-9):
@@ -188,8 +206,8 @@ def spectra(mid, stla, stlo, evla, evlo, evdp, mrr=0.0, mtt=0.0, mpp=0.0, mrt=0.
             t0, t1 = lo, lo + 6
             wt = _lagrange(thd, th_deg[t0:t1])
         W = np.outer(wr, wt)
-        S = f["strain_re"][:, :, r0:r1, t0:t1] + 1j * f["strain_im"][:, :, r0:r1, t0:t1]
-        D = f["disp_re"][:, :, r0:r1, t0:t1] + 1j * f["disp_im"][:, :, r0:r1, t0:t1]
+        S = _samples(f, fmt, "strain", r0, r1, t0, t1)
+        D = _samples(f, fmt, "disp", r0, r1, t0, t1)
 
     Sw = np.einsum("kprt,rt->kp", S.astype(np.complex128), W)     # (nw, 10)
     Dw = np.einsum("kprt,rt->kp", D.astype(np.complex128), W)     # (nw, 5)

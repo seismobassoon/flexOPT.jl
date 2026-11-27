@@ -1,6 +1,6 @@
 # moon_rsgt_h5.jl -- Moon synthetics from the HDF5 RSGT catalogue, standalone Julia (JLD2 + stdlib)
 #
-# Julia twin of moon_rsgt_py.py: reads rsgt_<id>.h5 (made by dev/moonRSGT/export_h5.jl) without
+# Julia twin of moon_rsgt_py.py: reads rsgt_<id>.h5 (v1 or compressed v2, made by dev/moonRSGT/export_h5.jl) without
 # flexOPT.  Same conventions as the Python reader:
 #   station (stla, stlo), event (evla, evlo) in degrees, evdp in km;
 #   moment tensor GCMT order/convention (r up, t south, p east) in N·m; force (fr, ft, fp) in N;
@@ -14,33 +14,64 @@
 
 using JLD2, LinearAlgebra, Printf
 
-const MOON_H5_FORMAT = "moonRSGT-h5 v1"
+const MOON_H5_FORMATS = ("moonRSGT-h5 v1", "moonRSGT-h5 v2")
 const MOON_H5_DIR = Ref(get(ENV, "MOON_RSGT_H5_DIR", expanduser("~/Dropbox/stage_tutore_2026/catalogue_h5")))
 
 "Sorted model ids present in the folder (files still being copied are listed too: use finished ones)."
 moonH5Ids(dir=MOON_H5_DIR[]) = sort([f[6:end-3] for f in readdir(dir) if startswith(f, "rsgt_") && endswith(f, ".h5")])
 
 moonH5File(id; dir=MOON_H5_DIR[]) =
-    (id isa AbstractString && isfile(id)) ? String(id) : joinpath(dir, "rsgt_" * lpad(string(id), 5, '0') * ".h5")
+    (id isa AbstractString && isfile(id)) ? String(id) : joinpath(dir, "rsgt_" * lpad(string(idconst _MOON_H5_LAST = Ref{Any}(nothing)
 
-const _MOON_H5_LAST = Ref{Any}(nothing)
-
-"Load one model (≈ 0.6 GB in memory); the last one loaded is kept, so loops over events are cheap."
+"""
+Open one model: metadata only (v2: the compressed θ blocks are read on demand, a few MB per
+synthetic; v1: the whole arrays, ≈ 0.6 GB).  The last model opened is kept, so loops over
+events in one model are cheap.
+"""
 function moonH5Load(id; dir=MOON_H5_DIR[])
     f = moonH5File(id; dir=dir)
     c = _MOON_H5_LAST[]
     (c !== nothing && c.file == f) && return c
     isfile(f) || error("no file $f")
-    d = JLD2.load(f)
-    get(d, "format", "") == MOON_H5_FORMAT || error("$f: not a $MOON_H5_FORMAT file")
-    c = (file=f, id=d["model_id"],
-         S=complex.(d["strain_re"], d["strain_im"]),      # (nθ, nr, 10, nω)
-         D=complex.(d["disp_re"], d["disp_im"]),          # (nθ, nr, 5, nω)
-         ps=d["pairs_strain_src"], pc=d["pairs_strain_comp"],
-         ds=d["pairs_disp_src"], dc=d["pairs_disp_comp"],
-         ω=d["omega"], ωI=d["omega_i"], tlen=d["tlen"],
-         r=d["r_km"], layer=d["layer"], θ=d["theta_deg"], R=d["R_km"], maxDepth=d["max_depth_km"])
+    c = jldopen(f, "r") do h
+        fmt = haskey(h, "format") ? h["format"] : ""
+        fmt in MOON_H5_FORMATS || error("$f: not a moonRSGT-h5 file")
+        v2 = fmt == "moonRSGT-h5 v2"
+        (file=f, v2=v2, id=h["model_id"],
+         S=v2 ? nothing : complex.(h["strain_re"], h["strain_im"]),      # v1: (nθ, nr, 10, nω)
+         D=v2 ? nothing : complex.(h["disp_re"], h["disp_im"]),
+         tstart=v2 ? h["theta_block_start"] : Int[],
+         blocks=Dict{Int,Any}(),
+         ps=h["pairs_strain_src"], pc=h["pairs_strain_comp"], ds=h["pairs_disp_src"], dc=h["pairs_disp_comp"],
+         ω=h["omega"], ωI=h["omega_i"], tlen=h["tlen"],
+         r=h["r_km"], layer=h["layer"], θ=h["theta_deg"], R=h["R_km"], maxDepth=h["max_depth_km"])
+    end
     _MOON_H5_LAST[] = c
+    return c
+end
+
+"Strain and displacement samples at θ indices `tidx` (contiguous): arrays (length(tidx), nr, np, nω)."
+function _h5samples(c, tidx::UnitRange{Int})
+    c.v2 || return (c.S[tidx, :, :, :], c.D[tidx, :, :, :])
+    ks = unique([searchsortedlast(c.tstart, i) for i in tidx])
+    length(c.blocks) + length(ks) > 8 && empty!(c.blocks)        # keep a few decompressed blocks
+    for k in ks
+        haskey(c.blocks, k) && continue
+        tag = lpad(k, 3, '0')
+        c.blocks[k] = jldopen(c.file, "r") do h
+            (complex.(h["strain_re_" * tag], h["strain_im_" * tag]), complex.(h["disp_re_" * tag], h["disp_im_" * tag]))
+        end
+    end
+    pS = Any[]; pD = Any[]
+    for i in tidx
+        k = searchsortedlast(c.tstart, i); j = i - c.tstart[k] + 1
+        push!(pS, c.blocks[k][1][j:j, :, :, :]); push!(pD, c.blocks[k][2][j:j, :, :, :])
+    end
+    S = Base.cat(pS...; dims=1); D = Base.cat(pD...; dims=1)
+    return S, D
+end
+
+ c
     return c
 end
 
@@ -106,11 +137,12 @@ function moonH5Spectra(id; stla, stlo, evla, evlo, evdp, Mrr=0.0, Mtt=0.0, Mpp=0
         lo = clamp(j - 2, 1, nt - 5); (lo:lo+5, _h5lagrange(θd, g[lo:lo+5]))
     end
     nω = length(c.ω)
-    Sw = zeros(ComplexF64, nω, size(c.S, 3)); Dw = zeros(ComplexF64, nω, size(c.D, 3))
-    for (ia, ir) in enumerate(rows), (ib, it) in enumerate(tidx)
+    Ssel, Dsel = _h5samples(c, first(tidx):last(tidx))            # (nθsel, nr, np, nω)
+    Sw = zeros(ComplexF64, nω, size(Ssel, 3)); Dw = zeros(ComplexF64, nω, size(Dsel, 3))
+    for (ia, ir) in enumerate(rows), ib in eachindex(tidx)
         w = wr[ia] * wt[ib]
-        Sw .+= w .* transpose(view(c.S, it, ir, :, :))
-        Dw .+= w .* transpose(view(c.D, it, ir, :, :))
+        Sw .+= w .* transpose(view(Ssel, ib, ir, :, :))
+        Dw .+= w .* transpose(view(Dsel, ib, ir, :, :))
     end
     Mm = [Mrr Mrt Mrp; Mrt Mtt Mtp; Mrp Mtp Mpp] ./ 1e18           # code units 1e18 N·m
     F = isnothing(force) ? zeros(3) : collect(Float64, force) ./ 1e15
